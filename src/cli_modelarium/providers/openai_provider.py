@@ -20,7 +20,7 @@ from cli_modelarium.exceptions import (
     ProviderOverloadedError,
     RateLimitError,
 )
-from cli_modelarium.pricing import calculate_cost
+from cli_modelarium.pricing import calculate_cost, rejects_sampling_params
 from cli_modelarium.providers._utils import extract_retry_after
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
 from cli_modelarium.security import redact_secrets
@@ -73,12 +73,20 @@ class OpenAIProvider(BaseProvider):
     ) -> AsyncIterator[str]:
         messages = self._build_messages(prompt, system_prompt)
         actual_model = self._transform_model(model)
+        create_kwargs: dict[str, Any] = {
+            "model": actual_model,
+            "messages": messages,
+            "stream": True,
+        }
+        # Predicate takes `model`, the ROUTING id - never `actual_model`, which
+        # LocalProvider has already stripped the `local/` prefix from. Reading
+        # actual_model would make local/gpt-5 match the reject set and silently
+        # drop temperature on a local server that supports it.
+        if not rejects_sampling_params(model):
+            create_kwargs["temperature"] = temperature
         try:
             response = await self.client.chat.completions.create(
-                model=actual_model,
-                messages=messages,
-                temperature=temperature,
-                stream=True,
+                **create_kwargs,
                 **self._extra_create_kwargs(),
             )
             async for chunk in response:
@@ -114,13 +122,19 @@ class OpenAIProvider(BaseProvider):
         output_tokens = 0
         cached_tokens = 0
 
+        create_kwargs: dict[str, Any] = {
+            "model": actual_model,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        # See stream(): the predicate takes `model`, not `actual_model`.
+        if not rejects_sampling_params(model):
+            create_kwargs["temperature"] = temperature
+
         try:
             response = await self.client.chat.completions.create(
-                model=actual_model,
-                messages=messages,
-                temperature=temperature,
-                stream=True,
-                stream_options={"include_usage": True},
+                **create_kwargs,
                 **self._extra_create_kwargs(),
             )
             async for chunk in response:
