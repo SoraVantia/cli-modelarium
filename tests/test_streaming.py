@@ -1,6 +1,6 @@
 """Tests for cli_modelarium.streaming.
 
-Covers the four orchestrator behaviors that Phase 4 added:
+Covers the orchestrator behaviours:
 
     * TTFT measured at the orchestrator level (post-semaphore, not from scheduling)
     * Per-provider semaphore caps in-flight calls
