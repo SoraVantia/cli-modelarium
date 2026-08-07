@@ -27,7 +27,7 @@ from cli_modelarium.exceptions import (
     ProviderOverloadedError,
     RateLimitError,
 )
-from cli_modelarium.pricing import calculate_cost
+from cli_modelarium.pricing import calculate_cost, rejects_sampling_params
 from cli_modelarium.providers._utils import extract_retry_after
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
 from cli_modelarium.security import redact_secrets
@@ -54,9 +54,12 @@ class AnthropicProvider(BaseProvider):
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        # Newer Claude models 400 on any non-default temperature; omitting the
+        # field is the documented way to call them. Absent flag means send.
+        if not rejects_sampling_params(model):
+            kwargs["temperature"] = temperature
         if system_prompt:
             kwargs["system"] = system_prompt
         return kwargs
