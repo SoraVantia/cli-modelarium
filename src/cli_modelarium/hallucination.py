@@ -12,7 +12,7 @@ A specialized judge configuration that:
       so the JudgeScore picks up the `risk_level` field.
     * Worst-case aggregates risk_level across panel judges (any High wins).
 
-This module deliberately reuses the Phase 8 judging machinery rather than
+This module deliberately reuses the judging machinery rather than
 forking it - the only judging-side additions are the optional `risk_level`
 field on `JudgeScore` and `aggregated_risk_level` on `JudgeResult`.
 """
