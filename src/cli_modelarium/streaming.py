@@ -245,8 +245,8 @@ async def _call_with_retry(
     rate_limit_delay = RATE_LIMIT_BASE_DELAY_SECONDS
     overloaded_delay = OVERLOADED_BASE_DELAY_SECONDS
 
-    # Treat empty system prompts as "no system prompt at all" per the
-    # build prompt's Phase 6 contract.
+    # Treat empty system prompts as "no system prompt at all": an empty
+    # --system-prompt must not reach the provider as a blank system message.
     effective_system_prompt = state.system_prompt or None
 
     for attempt in range(max_retries + 1):
