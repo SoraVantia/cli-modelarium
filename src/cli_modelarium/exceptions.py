@@ -60,6 +60,27 @@ class UnknownModelError(ConfigurationError):
     """Raised when a requested model is not in the registry."""
 
 
+class RetiredModelError(ConfigurationError):
+    """Raised when a requested model was retired by its provider.
+
+    Distinct from UnknownModelError on purpose: "unknown" reads as a typo,
+    which is misleading for an ID the tool deliberately retired. Subclassing
+    ConfigurationError (and so ModelariumError) matters - the compare and
+    batch commands catch ModelariumError, so reparenting this to Exception
+    would turn every retired-ID path into an unhandled traceback.
+    """
+
+    def __init__(self, model: str, replacement: str, retired_on: str) -> None:
+        self.model = model
+        self.replacement = replacement
+        self.retired_on = retired_on
+        super().__init__(
+            f"Model '{model}' was retired by its provider on {retired_on}.\n"
+            f"  Suggested replacement: {replacement}\n"
+            f"  Run: cli-modelarium list-models to see currently supported models."
+        )
+
+
 class UnknownProviderError(ConfigurationError):
     """Raised when a requested provider is not recognized."""
 
