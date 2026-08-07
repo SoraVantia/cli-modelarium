@@ -334,6 +334,37 @@ cli-modelarium "Summarize the key features of microservices architecture" \
 
 The command exits with code 1 if pass rate drops below 90%, failing the build.
 
+#### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success. |
+| `1` | Assertion failure - one or more assertions did not pass. `batch` only; `compare` has no assertions. |
+| `2` | The run could not complete. |
+
+Code `2` covers several distinct causes and **does not distinguish between them**: a missing API key, an unknown model, a retired model, a provider error, an exceeded cost cap, a malformed batch file, a rejected flag combination, an output-file conflict, or an exceeded batch size cap.
+
+Two rules are worth knowing before you gate a pipeline on these:
+
+- **Call failures outrank assertions.** If any model call fails, `batch` exits `2` without reporting an assertion verdict, even if assertions also failed. A red suite and a broken API key look the same from the exit code.
+- **An unreachable local server is not a failure.** `list-models --local` exits `0` when no server answers, so the exit code cannot be used to detect one.
+
+To find out *why* a run failed, read the `error` field of each result from JSON output - it carries the provider's message, with credential-shaped strings redacted:
+
+```bash
+cli-modelarium batch ./eval/test_suite.json \
+  --models gpt-5.5,claude-opus-4-7 \
+  --output-format json --output results.json
+code=$?
+if [ "$code" -eq 2 ]; then
+  jq -r '.results[] | select(.error) | "\(.model): \(.error)"' results.json
+fi
+```
+
+`--output-format json` is required - the default output carries no machine-readable error field. Note that failures which happen *before* any model is called (a missing key, an unknown model, a bad batch file) produce no JSON at all; the console message is the only signal in those cases.
+
+**Privacy note:** JSON output embeds the full prompt and the full model response for every result, alongside any provider error message. Treat `results.json` as sensitive before committing it or uploading it as a public CI artifact.
+
 ### More examples
 
 The [`examples/`](https://github.com/lavellehatcherjr/cli-modelarium/tree/main/examples) folder contains focused demo scripts for
@@ -426,8 +457,8 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | xAI (Grok 4.3, etc.) | ✅ | ✅ | ✅ |
 | DeepSeek (V4 Pro, V4 Flash, etc.) | ✅ | ✅ | ✅ |
 | Mistral (Large, Medium, Small) | ✅ | ✅ | ✅ |
-| Groq (Llama, Mixtral, etc.) | ✅ | ✅ | ✅ |
-| OpenRouter (any model on the platform) | ✅ | ✅ | ✅ |
+| Groq (Llama 3.3, Llama 4 Scout, gpt-oss) | ✅ | ✅ | ✅ |
+| OpenRouter (8 registered IDs: Qwen, DeepSeek R1, Llama 3.3, gpt-oss, GLM) | ✅ | ✅ | ✅ |
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, etc.; select Qwen models, International/Singapore) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air, etc.; OpenAI-compatible, overseas endpoint) | ✅ | ✅ | ✅ |
 | **Local: Ollama** | ❌ | ✅ | Free |
@@ -439,7 +470,7 @@ Run `cli-modelarium list-models` to see all currently supported models.
 
 ## Model groups
 
-Instead of listing model IDs, `--models` accepts a group shortcut. Groups are filtered against the providers you have configured, so a group only ever runs the models you actually have keys for.
+Instead of listing model IDs, `--models` accepts a group shortcut. Static groups expand verbatim: every member listed below runs, so you need a key for each provider the group spans, and the run aborts on the first one missing. The dynamic groups `all` and `all-local` are the exception - those resolve against what you actually have configured.
 
 **Static groups** (fixed membership):
 
@@ -447,10 +478,9 @@ Instead of listing model IDs, `--models` accepts a group shortcut. Groups are fi
 |-------|--------|
 | `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
-| `all-reasoning` | o3, o4-mini, deepseek-reasoner, magistral-medium-latest, magistral-small-latest, glm-5.2 |
-| `all-fast` | claude-haiku-4-5, gemini-3.5-flash, grok-4.20-0309-non-reasoning, deepseek-v4-flash, llama-3.3-70b-versatile, qwen3.6-flash, glm-5-turbo |
+| `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
-| `all-open-weight` | gpt-oss-120b, gpt-oss-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
+| `all-open-weight` | openai/gpt-oss-120b, openai/gpt-oss-safeguard-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
 
 **Dynamic groups** (resolved at runtime):
 
@@ -467,7 +497,7 @@ cli-modelarium "Explain CAP theorem" --models all-local
 
 Cli Modelarium uses a modular provider abstraction layer that hides the API differences between OpenAI's `messages` array, Anthropic's top-level `system` parameter, Google's `system_instruction`, and others. Every provider implements the same async streaming interface, so the CLI can run them all in parallel with `asyncio.gather()`.
 
-Cost calculations come from each provider's reported `usage` field (input tokens, output tokens, cached tokens) multiplied by current pricing constants. Pricing data was verified from official provider documentation on **June 22, 2026** - see [Notes & Limitations](#notes--limitations) for caveats.
+Cost calculations come from each provider's reported `usage` field (input tokens, output tokens, cached tokens) multiplied by current pricing constants. Pricing data was verified from official provider documentation on **July 29, 2026** - see [Notes & Limitations](#notes--limitations) for caveats.
 
 For local models, the same OpenAI Python SDK is used with a custom `base_url`, since Ollama, LM Studio, vLLM, and llama.cpp all expose OpenAI-compatible REST endpoints.
 
@@ -475,7 +505,7 @@ For local models, the same OpenAI Python SDK is used with a custom `base_url`, s
 
 ### Pricing data
 
-All pricing built into Cli Modelarium was verified from official provider documentation on **June 22, 2026**. LLM pricing changes frequently (sometimes monthly). The tool displays the `pricing_as_of` date in every output. Always verify against each provider's official pricing page before relying on cost calculations for budgeting or production decisions.
+All pricing built into Cli Modelarium was verified from official provider documentation on **July 29, 2026**. The Z.AI/GLM prices are the one exception: they carry an earlier **June 22, 2026** verification date, were not part of the most recent pass, and their entries are unchanged since then. LLM pricing changes frequently (sometimes monthly). The `pricing_as_of` date is carried in JSON output and shown in the console; CSV and Markdown output do not include it. Always verify against each provider's official pricing page before relying on cost calculations for budgeting or production decisions.
 
 Prices are each provider's standard/list public rate per 1M tokens (not batch, priority, off-peak, or promotional pricing); for input-size-tiered models the entry/short-context tier is shown, and cached pricing is the cache-read rate. DashScope/Qwen costs reflect non-thinking rates (the tool sends `enable_thinking=false`).
 
@@ -487,7 +517,7 @@ Rate limit handling and the default per-provider concurrency settings are based 
 
 ### Model availability
 
-Models supported by Cli Modelarium reflect what providers offered on **June 21, 2026**. Providers regularly release new models, deprecate older ones, and adjust capabilities. If a model in the registry no longer works, run `cli-modelarium list-models` and check the provider's documentation.
+Models supported by Cli Modelarium reflect what providers offered on **July 29, 2026**. Providers regularly release new models, deprecate older ones, and adjust capabilities. If a model in the registry no longer works, run `cli-modelarium list-models` and check the provider's documentation.
 
 ### Not a production-grade gateway
 
@@ -516,9 +546,11 @@ LLMs are non-deterministic at temperature > 0 - re-running the same prompt may p
 To draw more reliable conclusions:
 - Use `--runs 5` (or higher) to automatically run each comparison N times and see statistical summaries: mean/median latency, coefficient of variation, mode output, and output diversity. Coefficient of variation below 0.05 indicates stable model behavior across runs.
 - For hallucination consistency analysis, combine `--runs` with `--check-hallucination` to see how often the model produces hallucinations across multiple runs (the hallucination rate).
-- Use `--temperatures 0` for more deterministic outputs (where supported)
+- Use `--temperatures 0` for more deterministic outputs. Some models do not accept a temperature setting at all - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5` and `gpt-5.5`. The tool omits the field for those so the call still succeeds, and they run at their provider's default instead.
 - Compare across multiple prompts, not just one
 - Use the `--output json` flag to save runs for systematic analysis (with `--runs > 1` the JSON includes per-cell `stats_by_cell` aggregates)
+
+Those nine models are called without the temperature field, and `models_without_temperature` in the JSON output names the ones affected by any given run. Three consequences are worth knowing. A multi-value `--temperatures` sweep against one of them issues identical requests rather than a sweep, and the tool prints a warning when that happens. The temperature shown in the results table, the CSV and each JSON result record is the value you **requested**, not the value applied. And `--significance` is where this can change a conclusion rather than a label: comparing a model that omits temperature against one that honours it produces a variance difference that is a sampling artifact, which Welch or Mann-Whitney will report as though it were a model-quality difference. That case does warn: any significance run mixing an affected model with an unaffected one prints a `Temperature not applied` panel naming the models that ran at the provider default, and sets `significance_temperature_mixed` to `true` in the JSON output. A multi-temperature run that is also mixed gets both messages in a single panel. CSV carries no equivalent signal.
 
 ## About the author
 
