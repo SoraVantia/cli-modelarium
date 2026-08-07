@@ -161,7 +161,6 @@ class TestConstruction:
         LocalProvider()
 
         assert captured["base_url"] == "http://localhost:11434/v1"
-        # Confirms the build prompt's intended port.
         assert ":11434/v1" in captured["base_url"]
 
     def test_custom_base_url_honored(self, monkeypatch: pytest.MonkeyPatch) -> None:
