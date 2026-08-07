@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -25,6 +26,8 @@ from cli_modelarium.banner import render_banner, should_show_banner
 from cli_modelarium.batch import (
     ESTIMATE_INPUT_TOKENS,
     ESTIMATE_OUTPUT_TOKENS,
+    MAX_PROMPTS_PER_BATCH,
+    MAX_TOTAL_CALLS,
     BatchPrompt,
     build_batch_states,
     check_batch_size_limits,
@@ -41,6 +44,7 @@ from cli_modelarium.exceptions import (
     KeyNotConfiguredError,
     ModelariumError,
     OutputFormatError,
+    RetiredModelError,
     UnknownModelError,
     UnknownProviderError,
 )
@@ -75,8 +79,10 @@ from cli_modelarium.output_formatters import (
 )
 from cli_modelarium.pricing import (
     PRICING,
+    RETIRED_MODELS,
     is_local_model,
     pricing_freshness_note,
+    rejects_sampling_params,
 )
 from cli_modelarium.providers.base import BaseProvider
 from cli_modelarium.providers.local_provider import LocalProvider
@@ -119,6 +125,50 @@ EXIT_ASSERTION_FAILED = 1  # batch mode: at least one assertion failed
 EXIT_CALL_FAILED = 2
 
 console = Console()
+
+# Formats whose bytes a program parses rather than a person reads.
+MACHINE_FORMATS = frozenset({"json", "csv"})
+
+
+def _payload_owns_stdout(output: str | None, output_format: str | None) -> bool:
+    """True when stdout carries a machine payload and nothing else may share it.
+
+    Read from the raw option values rather than `_resolve_batch_output`, because
+    the first console write in `batch` happens before that resolution runs. The
+    two agree: `--output` absent means no file, and the format is whatever
+    `--output-format` says.
+    """
+    return output is None and (output_format or "").lower() in MACHINE_FORMATS
+
+
+def _stderr_console_when_piping(func: Callable) -> Callable:
+    """Send a command's human output to stderr when stdout is a data pipe.
+
+    A scope decision, not a per-site one. Ten call sites across `batch` and
+    `compare` write through the module `console` - progress, panels, warnings,
+    the run summary - and none of them knows the output format. Enumerating
+    them has been tried and missed sites twice; rebinding the console once
+    covers every site, including any added later.
+
+    `banner.py` reaches for the same tool for the same reason: output on stderr
+    physically cannot land in a stdout data pipeline.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        global console
+        if not _payload_owns_stdout(kwargs.get("output"), kwargs.get("output_format")):
+            return func(*args, **kwargs)
+        original = console
+        console = Console(stderr=True)
+        try:
+            return func(*args, **kwargs)
+        finally:
+            # Restored even on SystemExit: CliRunner invokes commands in-process,
+            # so a leaked stderr console would follow into the next test.
+            console = original
+
+    return wrapper
 
 
 class _DefaultCommandGroup(click.Group):
@@ -374,6 +424,7 @@ def main(ctx: click.Context) -> None:
         "across invocations."
     ),
 )
+@_stderr_console_when_piping
 def compare(
     prompt: str,
     models: str,
@@ -418,6 +469,14 @@ def compare(
             raise click.UsageError("--models must include at least one model ID or group.")
         model_list = _resolve_dynamic_groups(model_list, local_url)
         temp_list = _parse_temperatures(temperatures)
+        # After group expansion, so an id that arrived via `all-flagship` is
+        # named even though the user never typed it.
+        significance_runs = _significance_will_run(significance, runs, len(model_list))
+        omitted_models, honoured_models = _mixes_temperature_handling(model_list)
+        temperature_mixed = significance_runs and bool(omitted_models and honoured_models)
+        _warn_temperature_conditions(
+            model_list, temp_list, significance_runs=significance_runs
+        )
         system_prompt_list = _resolve_system_prompts(
             system_prompt=system_prompt,
             system_prompts=system_prompts,
@@ -428,7 +487,7 @@ def compare(
             judge_criteria=judge_criteria,
             judge_template=judge_template,
         )
-        # Phase 10 hallucination preset overrides judge criteria + template
+        # The hallucination preset overrides judge criteria + template
         # AND swaps in the hallucination response parser. None when not active.
         hallucination_config = resolve_hallucination_config(
             check_hallucination=check_hallucination,
@@ -572,11 +631,10 @@ def compare(
         sys.exit(EXIT_CALL_FAILED)
 
     # Pairwise significance: auto-enable when runs > 1 with 2+ models,
-    # unless the user explicitly opted out with --no-significance.
-    if significance is None:
-        should_compute_significance = runs > 1 and len(model_list) >= 2
-    else:
-        should_compute_significance = significance
+    # unless the user explicitly opted out with --no-significance. Shared with
+    # the temperature warning above so the caveat and the verdict cannot
+    # disagree about whether a verdict is being produced.
+    should_compute_significance = significance_runs
 
     # v0.1.3: bootstrap CIs auto-enable when runs > 1 (matching significance
     # pattern). User can opt out with --no-confidence-intervals.
@@ -694,6 +752,8 @@ def compare(
             stats_by_cell_cis=stats_by_cell_with_ci,
             mcnemar_results=mcnemar_results,
             methodology=methodology,
+            models_without_temperature=_models_without_temperature(model_list),
+            significance_temperature_mixed=temperature_mixed,
         )
     elif runs > 1:
         _display_results_with_runs(
@@ -844,8 +904,14 @@ def compare(
 )
 @click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
 @click.option(
-    "--force-large", is_flag=True, help="Bypass safety caps (max 1000 prompts, max 10000 calls)."
+    "--force-large",
+    is_flag=True,
+    help=(
+        f"Bypass safety caps (max {MAX_PROMPTS_PER_BATCH} prompts, "
+        f"max {MAX_TOTAL_CALLS} calls)."
+    ),
 )
+@_stderr_console_when_piping
 def batch(
     file: str,
     models: str,
@@ -915,6 +981,7 @@ def batch(
             raise click.UsageError("--models must include at least one model ID or group.")
         model_list = _resolve_dynamic_groups(model_list, local_url)
         temp_list = _parse_temperatures(temperatures)
+        _warn_temperature_sweep(model_list, temp_list)
         command_sp_list = _resolve_system_prompts(
             system_prompt=system_prompt,
             system_prompts=system_prompts,
@@ -925,7 +992,7 @@ def batch(
             judge_criteria=judge_criteria,
             judge_template=judge_template,
         )
-        # Phase 10 hallucination preset; None when not active. Overrides
+        # The hallucination preset; None when not active. Overrides
         # judge criteria and template, and swaps in the hallucination
         # response parser later.
         hallucination_config = resolve_hallucination_config(
@@ -1077,7 +1144,17 @@ def batch(
         jr = judge_results[i] if judge_results is not None else None
         ar = assertion_results_per_state[i]
         results.append(state_to_result(state, bp, judge_result=jr, assertion_results=ar))
-    _emit_batch_results(results, output_path=output_path, output_fmt=output_fmt)
+    _emit_batch_results(
+        results,
+        output_path=output_path,
+        output_fmt=output_fmt,
+        models_without_temperature=_models_without_temperature(model_list),
+        # `batch` has no --runs and no --significance, so it never computes a
+        # verdict and the mixed-sampling caveat cannot apply. Threaded
+        # explicitly rather than left to the default so the reason is on record
+        # at the call site: the day batch gains --runs, this is what moves.
+        significance_temperature_mixed=False,
+    )
 
     failed = sum(1 for r in results if r.error)
     success = len(results) - failed
@@ -1355,6 +1432,29 @@ def _flatten_cell_cis(
     return out
 
 
+def _write_machine_payload(payload: str) -> None:
+    """Write a serialized payload to stdout without letting Rich touch it.
+
+    Bypasses the console entirely. Rich reflows at the terminal width, consumes
+    square-bracket markup, and colours numbers and URLs - all fine for a table
+    and all corruption for a payload. Encoding is pinned to UTF-8 so the bytes
+    match `write_json` / `write_csv` exactly, rather than following the locale
+    and picking up CRLF translation on Windows.
+
+    The flush keeps ordering independent of whether the text layer above this
+    buffer happens to be write-through.
+    """
+    data = payload.encode("utf-8")
+    sys.stdout.flush()
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:
+        # Exotic capture shim with no binary layer: still avoid Rich.
+        sys.stdout.write(payload)
+        return
+    buffer.write(data)
+    buffer.flush()
+
+
 def _emit_batch_results(
     results: list,
     *,
@@ -1365,6 +1465,8 @@ def _emit_batch_results(
     stats_by_cell_cis: dict | None = None,
     mcnemar_results: list | None = None,
     methodology: dict | None = None,
+    models_without_temperature: list[str] | None = None,
+    significance_temperature_mixed: bool = False,
 ) -> None:
     """Dispatch to the right writer/renderer based on resolved format.
 
@@ -1387,18 +1489,17 @@ def _emit_batch_results(
         elif output_fmt == "csv":
             from cli_modelarium.output_formatters import _format_csv
 
-            console.print(
+            _write_machine_payload(
                 _format_csv(
                     results,
                     runs=runs,
                     stats_by_cell_cis=stats_by_cell_cis,
-                ),
-                end="",
+                )
             )
         elif output_fmt == "json":
             from cli_modelarium.output_formatters import _format_json
 
-            console.print(
+            _write_machine_payload(
                 _format_json(
                     results,
                     runs=runs,
@@ -1406,8 +1507,9 @@ def _emit_batch_results(
                     stats_by_cell_cis=stats_by_cell_cis,
                     mcnemar_results=mcnemar_results,
                     methodology=methodology,
-                ),
-                end="",
+                    models_without_temperature=models_without_temperature,
+                    significance_temperature_mixed=significance_temperature_mixed,
+                )
             )
         else:
             _print_error(f"Unsupported output format: {output_fmt!r}")
@@ -1430,6 +1532,8 @@ def _emit_batch_results(
             stats_by_cell_cis=stats_by_cell_cis,
             mcnemar_results=mcnemar_results,
             methodology=methodology,
+            models_without_temperature=models_without_temperature,
+            significance_temperature_mixed=significance_temperature_mixed,
         )
     elif output_fmt == "markdown":
         write_markdown(
@@ -1808,6 +1912,15 @@ def pricing_cmd(model: str | None, show_all: bool) -> None:
         console.print(f"[bold]{model}[/bold]: [dim]Free (local model)[/dim]")
         return
 
+    # This path reads PRICING directly and bypasses get_provider_for_model(),
+    # so the retirement check has to be repeated here - otherwise a retired ID
+    # would report as a generic not-found.
+    retired = RETIRED_MODELS.get(model)
+    if retired is not None:
+        replacement, retired_on = retired
+        _print_error(str(RetiredModelError(model, replacement, retired_on)))
+        sys.exit(EXIT_CALL_FAILED)
+
     entry = PRICING.get(model)
     if entry is None:
         _print_error(f"Unknown model: {model}. Run `cli-modelarium list-models` to see options.")
@@ -1823,6 +1936,140 @@ def pricing_cmd(model: str | None, show_all: bool) -> None:
 
 
 # ===== helpers =====
+
+
+def _sweep_caveat(affected: list[str], temperature_count: int) -> str:
+    """The sweep half of the temperature caveat: every value produces one request."""
+    verb, pronoun = ("does not", "it") if len(affected) == 1 else ("do not", "them")
+    return (
+        f"{', '.join(affected)} {verb} accept a temperature setting, so the "
+        f"field is omitted for {pronoun}. All {temperature_count} runs of each "
+        f"will be identical rather than a sweep, and the temperature shown in "
+        f"the results reflects what was requested, not what was applied."
+    )
+
+
+def _significance_caveat(omitted: list[str]) -> str:
+    """The significance half: the samples being compared are not comparable."""
+    return (
+        f"{', '.join(omitted)} ran at the provider default temperature, which "
+        f"you did not choose - the provider rejects the field, so it is omitted. "
+        f"The models in this run were therefore not sampled under identical "
+        f"conditions, and a significance result across them may reflect that "
+        f"difference rather than a difference in model quality."
+    )
+
+
+def _warn_temperature_sweep(models: list[str], temperatures: list[float]) -> None:
+    """Warn when a multi-value sweep includes a model that ignores temperature.
+
+    Those models have the field omitted entirely, so every value in the sweep
+    produces an identical request. Fires for group-expanded ids too - by this
+    point `all-premium` is already eight concrete ids, which is the case where
+    the user never typed the affected name and most needs telling.
+
+    This is `batch`'s emitter. `batch` has no `--runs` and no `--significance`,
+    so the sweep is the only temperature caveat that can arise there. `compare`
+    uses `_warn_temperature_conditions()`, which can merge this text with the
+    significance caveat.
+    """
+    if len(temperatures) < 2:
+        return
+    affected = _models_without_temperature(models)
+    if not affected:
+        return
+    console.print(
+        Panel(
+            _sweep_caveat(affected, len(temperatures)),
+            title="Temperature not applied",
+            border_style="yellow",
+        )
+    )
+
+
+def _warn_temperature_conditions(
+    models: list[str],
+    temperatures: list[float],
+    *,
+    significance_runs: bool,
+) -> None:
+    """Emit the temperature caveats for this run as a SINGLE panel.
+
+    Two conditions each produce a caveat and can hold at once:
+
+      * a multi-value sweep containing a model with the field omitted - every
+        value in the sweep produces an identical request
+      * a significance run mixing models that omit the field with models that
+        honour it - the two groups were sampled under different conditions, so
+        the p-value can be reporting that rather than model quality
+
+    When both hold the two messages are MERGED into one panel rather than either
+    being suppressed. Suppressing the sweep half would not deduplicate it: it
+    fires today on runs this one cannot cover (`batch`, and any `compare` left
+    at the default `--runs 1`, where no verdict is computed), so suppression
+    would delete it from those runs entirely.
+
+    Call this AFTER group expansion, so an id that arrived via `all-flagship` is
+    named even though the user never typed it.
+    """
+    omitted, honoured = _mixes_temperature_handling(models)
+    parts: list[str] = []
+    if len(temperatures) >= 2 and omitted:
+        parts.append(_sweep_caveat(omitted, len(temperatures)))
+    if significance_runs and omitted and honoured:
+        parts.append(_significance_caveat(omitted))
+    if not parts:
+        return
+    console.print(
+        Panel(
+            "\n\n".join(parts),
+            title="Temperature not applied",
+            border_style="yellow",
+        )
+    )
+
+
+def _mixes_temperature_handling(models: list[str]) -> tuple[list[str], list[str]]:
+    """Split a resolved model list into (omitted, honoured).
+
+    Both non-empty means the models were sampled under different conditions.
+
+    Both halves are sorted and de-duplicated. The omitted half is exactly
+    `_models_without_temperature()`; the honoured half is everything else, which
+    includes ids absent from `PRICING` - local and unregistered - since
+    those keep receiving `temperature`. Only the omitted half is ever rendered:
+    it is a subset of the registry keys, whereas the honoured half can contain
+    arbitrary user-supplied text.
+    """
+    omitted = _models_without_temperature(models)
+    honoured = sorted({m for m in models if m not in set(omitted)})
+    return omitted, honoured
+
+
+def _significance_will_run(significance: bool | None, runs: int, model_count: int) -> bool:
+    """Whether this invocation will actually compute a significance verdict.
+
+    `--significance/--no-significance` is TRI-STATE: `None` means auto-enable,
+    so `if significance` reads the DEFAULT path as "off" - which is precisely the
+    path with no signal today. The enablement decision and the `runs`/model-count
+    gate it is later applied under are collapsed here so the warning and the
+    computation cannot drift apart.
+    """
+    if significance is None:
+        enabled = runs > 1 and model_count >= 2
+    else:
+        enabled = significance
+    return enabled and runs > 1 and model_count >= 2
+
+
+def _models_without_temperature(models: list[str]) -> list[str]:
+    """Models in this run whose `temperature` was omitted from the request.
+
+    Sorted and de-duplicated. Always safe to emit: the predicate is False for
+    anything absent from PRICING, so local and unregistered ids can
+    never appear here - the list is a subset of the flagged registry entries.
+    """
+    return sorted({m for m in models if rejects_sampling_params(m)})
 
 
 def _parse_temperatures(raw: str) -> list[float]:
@@ -1845,7 +2092,7 @@ def _resolve_all_cloud() -> list[str]:
     """Every cloud PRICING model whose provider has a configured API key.
 
     Excludes local models and the OpenRouter entries (the latter are a few
-    representative/$0-fallback rows, not OpenRouter's full catalog).
+    registered rows, not OpenRouter's full catalog).
     """
     out: list[str] = []
     for model, entry in PRICING.items():
@@ -1968,8 +2215,8 @@ def _resolve_system_prompts(
     return [None]
 
 
-# Re-export under the cli.py namespace for backward compatibility with
-# Phase 6 and Phase 8 tests that import these private aliases directly.
+# Re-export under the cli.py namespace for backward compatibility with the
+# system-prompt and judging tests that import these private aliases directly.
 _split_escaped_csv = split_escaped_csv
 _split_system_prompts = split_escaped_csv
 
@@ -2019,7 +2266,7 @@ def _resolve_judge_criteria_and_template(
 def _validate_judge_models(judge_models: list[str], *, local_url: str | None) -> None:
     """Ensure every judge model is in the registry AND has a configured key.
 
-    This runs BEFORE any main API calls - the build prompt's contract is
+    This runs BEFORE any main API calls - the contract is
     that a misconfigured judge fails the run immediately, not after burning
     money on the comparison.
     """
@@ -2165,6 +2412,19 @@ def _display_results(
         table.add_row(*row)
 
     console.print(table)
+
+    # Degraded-judge caveat. The console user is the primary audience, so this
+    # renders real text rather than reusing the Score-column plumbing, which
+    # never displayed skipped_models at all.
+    if judge_results is not None:
+        degraded = sorted({m for jr in judge_results for m in jr.degraded_models})
+        if degraded:
+            console.print(
+                f"[yellow]Note: judge determinism not guaranteed for "
+                f"{', '.join(degraded)}. These models reject a temperature "
+                f"setting, so the judge ran at the provider default instead of "
+                f"0.0 and its scores are not reproducible run to run.[/yellow]"
+            )
     console.print()
 
     # Per-model output blocks. When multiple SPs are in play, identify which
@@ -2612,8 +2872,6 @@ def _display_significance(significance_results: list) -> None:
 def _score_cell_for_compare(jr: JudgeResult) -> str:
     """Render the Score column cell for the compare command's results table."""
     if not jr.judges:
-        if jr.skipped_models:
-            return "[dim]-[/dim]"
         return "[dim]-[/dim]"
     successful = [j for j in jr.judges if j.score is not None]
     if not successful:
