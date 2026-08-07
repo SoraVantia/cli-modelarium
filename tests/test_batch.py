@@ -180,7 +180,9 @@ class TestJsonParser:
             load_batch_file(str(path))
 
     def test_assertions_preserved_as_raw_dicts(self, tmp_path: Path) -> None:
-        """Phase 9 will execute these; for now we carry them through verbatim."""
+        """The loader preserves assertion configs verbatim - it does not parse or
+        validate them. Execution happens later, against the raw dicts.
+        """
         path = tmp_path / "p.json"
         path.write_text(
             json.dumps(
