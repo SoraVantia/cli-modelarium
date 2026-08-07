@@ -7,7 +7,7 @@
 
 注: このREADMEはアクセシビリティのために翻訳されています。Cli Modelarium CLI ツール自体は英語のみで出力されます。すべてのコマンド、エラーメッセージ、出力は、システムロケールに関係なく英語のままです。
 
-> Note: Features added after v0.1.0 (`--runs` in v0.1.1, statistical significance in v0.1.2, confidence intervals/paired tests/McNemar in v0.1.3) are documented in English only — translations pending.
+> 注: 次の7つのセクションは英語版 README にのみ存在します — *Reproducibility analysis*、*Statistical significance testing*、*Bootstrap confidence intervals*、*Paired tests for same-prompt comparisons*、*McNemar's test for hallucination significance*、*Headless Linux servers*、*More examples*。機能自体はすべて利用可能で、ここに欠けているのはその説明だけです。[README.md](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.md) を参照してください。
 
 > 10のクラウドプロバイダー＋ローカルモデルのLLM出力をターミナルから横並びで比較。並列ストリーミング、バッチ評価、LLM-as-judgeスコアリング、ハルシネーション検出、CI/CD対応のアサーション機能を搭載。
 
@@ -209,6 +209,37 @@ cli-modelarium "Summarize the key features of microservices architecture" \
 
 合格率が90%を下回ると、コマンドは終了コード1で終了し、ビルドが失敗します。
 
+#### 終了コード
+
+| コード | 意味 |
+|--------|------|
+| `0` | 成功。 |
+| `1` | アサーション失敗 - 1つ以上のアサーションが通らなかった。`batch` のみ。`compare` にアサーションはありません。 |
+| `2` | 実行を完了できなかった。 |
+
+コード `2` は複数の異なる原因を含み、**それらを区別しません**。APIキーの未設定、未知のモデル、提供終了したモデル、プロバイダーのエラー、コスト上限の超過、不正な形式のバッチファイル、許可されないフラグの組み合わせ、出力ファイルの競合、バッチサイズ上限の超過のいずれもコード `2` になります。
+
+パイプラインをこれらのコードで制御する前に、次の2点を把握しておいてください。
+
+- **呼び出しの失敗はアサーションより優先されます。** モデル呼び出しが1つでも失敗すると、`batch` はアサーションの判定を報告せずに `2` で終了します。アサーションも失敗していた場合でも同じです。テストスイートの失敗と無効なAPIキーは、終了コードからは区別できません。
+- **ローカルサーバーに到達できないことは失敗ではありません。** サーバーが応答しない場合でも `list-models --local` は `0` で終了するため、終了コードでサーバーの有無を判定することはできません。
+
+実行が*なぜ*失敗したかを知るには、JSON出力の各結果にある `error` フィールドを読んでください。プロバイダーのメッセージが入り、認証情報らしき文字列は伏字にされます。
+
+```bash
+cli-modelarium batch ./eval/test_suite.json \
+  --models gpt-5.5,claude-opus-4-7 \
+  --output-format json --output results.json
+code=$?
+if [ "$code" -eq 2 ]; then
+  jq -r '.results[] | select(.error) | "\(.model): \(.error)"' results.json
+fi
+```
+
+`--output-format json` が必要です。デフォルトの出力には機械可読なエラーフィールドがありません。なお、モデルを呼び出す*前*に発生した失敗（キーの未設定、未知のモデル、不正なバッチファイル）ではJSONがまったく生成されないため、その場合はコンソールのメッセージが唯一の手がかりになります。
+
+**プライバシーに関する注意:** JSON出力には各結果のプロンプト全文とモデル応答全文、さらにプロバイダーのエラーメッセージが含まれます。`results.json` をコミットしたり、公開されるCIアーティファクトとしてアップロードしたりする前に、機密情報として扱ってください。
+
 ## 設定
 
 ### APIキー
@@ -266,8 +297,8 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | xAI (Grok 4.3, など) | ✅ | ✅ | ✅ |
 | DeepSeek (V4 Pro, V4 Flash, など) | ✅ | ✅ | ✅ |
 | Mistral (Large, Medium, Small) | ✅ | ✅ | ✅ |
-| Groq (Llama, Mixtral, など) | ✅ | ✅ | ✅ |
-| OpenRouter (プラットフォーム上のすべてのモデル) | ✅ | ✅ | ✅ |
+| Groq (Llama 3.3, Llama 4 Scout, gpt-oss) | ✅ | ✅ | ✅ |
+| OpenRouter (登録済みの8つのID: Qwen、DeepSeek R1、Llama 3.3、gpt-oss、GLM) | ✅ | ✅ | ✅ |
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, など、一部のQwenモデル、International/Singapore) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air, など；OpenAI互換、海外エンドポイント) | ✅ | ✅ | ✅ |
 | **ローカル: Ollama** | ❌ | ✅ | 無料 |
@@ -279,7 +310,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 
 ## モデルグループ
 
-モデルIDを列挙する代わりに、`--models` はグループのショートカットを受け付けます。グループは設定済みのプロバイダーに対してフィルタリングされるため、グループは実際にキーを持っているモデルのみを常に実行します。
+モデルIDを列挙する代わりに、`--models` はグループのショートカットを受け付けます。静的グループはそのまま展開されます。以下に挙げるすべてのメンバーが実行されるため、グループが対象とする各プロバイダーのキーが必要であり、最初に見つかった不足キーの時点で実行は中断されます。動的グループの `all` と `all-local` は例外で、これらは実際に設定済みの内容に対して解決されます。
 
 **静的グループ**（メンバーシップは固定）:
 
@@ -287,10 +318,9 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 |-------|--------|
 | `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
-| `all-reasoning` | o3, o4-mini, deepseek-reasoner, magistral-medium-latest, magistral-small-latest, glm-5.2 |
-| `all-fast` | claude-haiku-4-5, gemini-3.5-flash, grok-4.20-0309-non-reasoning, deepseek-v4-flash, llama-3.3-70b-versatile, qwen3.6-flash, glm-5-turbo |
+| `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
-| `all-open-weight` | gpt-oss-120b, gpt-oss-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
+| `all-open-weight` | openai/gpt-oss-120b, openai/gpt-oss-safeguard-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
 
 **動的グループ**（実行時に解決）:
 
@@ -307,7 +337,7 @@ cli-modelarium "CAP定理を説明して" --models all-local
 
 Cli Modelarium は、OpenAIの `messages` 配列、Anthropicのトップレベル `system` パラメータ、Googleの `system_instruction` など、API間の違いを隠すモジュラーなプロバイダー抽象化レイヤーを使用しています。すべてのプロバイダーは同じ非同期ストリーミングインターフェースを実装しているため、CLIは `asyncio.gather()` ですべてを並列に実行できます。
 
-コスト計算は、各プロバイダーが報告する `usage` フィールド（入力トークン、出力トークン、キャッシュされたトークン）に現在の価格定数を乗算して算出されます。価格データは **2026年6月22日** に公式プロバイダードキュメントから検証されました - 注意事項については [注意事項と制限](#注意事項と制限) を参照してください。
+コスト計算は、各プロバイダーが報告する `usage` フィールド（入力トークン、出力トークン、キャッシュされたトークン）に現在の価格定数を乗算して算出されます。価格データは **2026年7月29日** に公式プロバイダードキュメントから検証されました - 注意事項については [注意事項と制限](#注意事項と制限) を参照してください。
 
 ローカルモデルの場合、Ollama、LM Studio、vLLM、llama.cpp はすべてOpenAI互換のRESTエンドポイントを公開しているため、カスタム `base_url` を使用した同じOpenAI Python SDKが使用されます。
 
@@ -315,7 +345,7 @@ Cli Modelarium は、OpenAIの `messages` 配列、Anthropicのトップレベ�
 
 ### 価格データ
 
-Cli Modelarium に組み込まれているすべての価格は、**2026年6月22日** に公式プロバイダードキュメントから検証されました。LLMの価格は頻繁に変更されます（時には月単位で）。ツールは各出力に `pricing_as_of` 日付を表示します。予算編成や本番環境の決定にコスト計算を信頼する前に、必ず各プロバイダーの公式価格ページと照合してください。
+Cli Modelarium に組み込まれているすべての価格は、**2026年7月29日** に公式プロバイダードキュメントから検証されました。Z.AI/GLM の価格のみ例外です。これらは **2026年6月22日** という以前の検証日を保持しており、直近の検証には含まれておらず、それ以降エントリは変更されていません。LLMの価格は頻繁に変更されます（時には月単位で）。`pricing_as_of` 日付は JSON 出力に含まれ、コンソールにも表示されます。CSV 出力と Markdown 出力には含まれません。予算編成や本番環境の決定にコスト計算を信頼する前に、必ず各プロバイダーの公式価格ページと照合してください。
 
 価格は、各プロバイダーの100万トークンあたりの標準/定価の公開レートです（バッチ、優先、オフピーク、プロモーション価格ではありません）。入力サイズによってティアが分かれるモデルでは、エントリー/短コンテキストのティアを表示し、キャッシュ価格はキャッシュ読み取りレートです。DashScope/Qwenのコストは非思考（non-thinking）レートを反映しています（ツールは `enable_thinking=false` を送信します）。
 
@@ -327,7 +357,7 @@ Cli Modelarium に組み込まれているすべての価格は、**2026年6月2
 
 ### モデルの利用可能性
 
-Cli Modelarium がサポートするモデルは、**2026年6月21日** にプロバイダーが提供していたものを反映しています。プロバイダーは定期的に新しいモデルをリリースし、古いモデルを廃止し、機能を調整しています。レジストリ内のモデルが動作しなくなった場合は、`cli-modelarium list-models` を実行し、プロバイダーのドキュメントを確認してください。
+Cli Modelarium がサポートするモデルは、**2026年7月29日** にプロバイダーが提供していたものを反映しています。プロバイダーは定期的に新しいモデルをリリースし、古いモデルを廃止し、機能を調整しています。レジストリ内のモデルが動作しなくなった場合は、`cli-modelarium list-models` を実行し、プロバイダーのドキュメントを確認してください。
 
 ### 本番グレードのゲートウェイではありません
 
@@ -354,10 +384,12 @@ Cli Modelarium には、`--judge` フラグで有効化されるオプション�
 LLMは温度 > 0 で非決定論的です - 同じプロンプトを再実行すると、異なる出力が生成される可能性があります。単一の比較実行では、各モデルから1つのサンプルが表示されるだけであり、決定的な品質判定ではありません。
 
 より信頼性の高い結論を導き出すには:
-- より決定論的な出力のために `--temperatures 0` を使用（サポートされている場合）
+- より決定論的な出力のために `--temperatures 0` を使用。一部のモデルは温度設定を一切受け付けません - `claude-opus-4-7`、`claude-opus-4-8`、`claude-opus-5`、`claude-sonnet-5`、`claude-fable-5`、`o3`、`o4-mini`、`gpt-5`、`gpt-5.5` です。ツールはこれらのモデルに対してこのフィールドを省略するため呼び出しは成功し、モデルはプロバイダーのデフォルト値で実行されます。
 - 同じ比較を3〜5回実行し、パターンを探す
 - 1つだけでなく、複数のプロンプトにわたって比較する
 - 体系的な分析のために実行結果を保存するには `--output json` フラグを使用
+
+これら9つのモデルは温度フィールドなしで呼び出され、JSON 出力の `models_without_temperature` には、その実行で影響を受けたモデルが列挙されます。知っておくべき結果が3つあります。複数の値を指定した `--temperatures` のスイープは、これらのモデルに対しては実際のスイープではなく同一のリクエストを発行します。その場合ツールは警告を表示します。結果テーブル、CSV、および各 JSON 結果レコードに表示される温度は、実際に適用された値ではなく**要求された**値です。そして `--significance` は、これがラベルではなく結論そのものを変えうる場面です。温度を省略するモデルと温度を尊重するモデルを比較すると、サンプリングによる分散の差が生じますが、Welch や Mann-Whitney はそれをモデルの品質差であるかのように報告します。この場合も警告は表示されます。影響を受けるモデルと受けないモデルを混在させた有意差検定は、プロバイダーのデフォルト温度で実行されたモデル名を挙げた `Temperature not applied` パネルを表示し、JSON 出力の `significance_temperature_mixed` を `true` にします。複数温度かつ混在している実行では、両方のメッセージが1つのパネルにまとめて表示されます。CSV には同等の情報はありません。
 
 ## 著者について
 
