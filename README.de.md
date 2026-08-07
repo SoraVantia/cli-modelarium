@@ -7,7 +7,7 @@ Lesen Sie dies in anderen Sprachen: [English](README.md) | [日本語](README.ja
 
 Hinweis: Diese README ist aus Gründen der Zugänglichkeit übersetzt. Das Cli Modelarium CLI-Tool selbst gibt nur Englisch aus. Alle Befehle, Fehlermeldungen und Ausgaben bleiben unabhängig von Ihrer System-Locale auf Englisch.
 
-> Note: Features added after v0.1.0 (`--runs` in v0.1.1, statistical significance in v0.1.2, confidence intervals/paired tests/McNemar in v0.1.3) are documented in English only — translations pending.
+> Hinweis: Sieben Abschnitte gibt es bisher nur im englischen README — *Reproducibility analysis*, *Statistical significance testing*, *Bootstrap confidence intervals*, *Paired tests for same-prompt comparisons*, *McNemar's test for hallucination significance*, *Headless Linux servers* und *More examples*. Die Funktionen selbst sind vollständig verfügbar; nur ihre Dokumentation fehlt hier. Siehe [README.md](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.md).
 
 > Vergleichen Sie LLM-Ausgaben nebeneinander von Ihrem Terminal aus - 10 Cloud-Anbieter + lokale Modelle, mit parallelem Streaming, Batch-Evaluierung, LLM-as-Judge-Scoring, Halluzinationserkennung und CI/CD-fähigen Assertions.
 
@@ -209,6 +209,37 @@ cli-modelarium "Summarize the key features of microservices architecture" \
 
 Der Befehl beendet mit Code 1, wenn die Pass-Rate unter 90% fällt, wodurch der Build fehlschlägt.
 
+#### Exit-Codes
+
+| Code | Bedeutung |
+|------|-----------|
+| `0` | Erfolg. |
+| `1` | Assertion-Fehler - eine oder mehrere Assertions sind fehlgeschlagen. Nur `batch`; `compare` kennt keine Assertions. |
+| `2` | Der Lauf konnte nicht abgeschlossen werden. |
+
+Code `2` deckt mehrere verschiedene Ursachen ab und **unterscheidet nicht zwischen ihnen**: ein fehlender API-Schlüssel, ein unbekanntes Modell, ein eingestelltes Modell, ein Provider-Fehler, ein überschrittenes Kostenlimit, eine fehlerhafte Batch-Datei, eine abgelehnte Flag-Kombination, ein Konflikt bei der Ausgabedatei oder ein überschrittenes Batch-Größenlimit.
+
+Zwei Regeln sollten Sie kennen, bevor Sie eine Pipeline darauf aufbauen:
+
+- **Aufruffehler haben Vorrang vor Assertions.** Schlägt ein Modellaufruf fehl, beendet `batch` mit `2`, ohne ein Assertion-Ergebnis zu melden - selbst wenn auch Assertions fehlgeschlagen sind. Eine rote Suite und ein ungültiger API-Schlüssel sehen am Exit-Code gleich aus.
+- **Ein nicht erreichbarer lokaler Server ist kein Fehler.** `list-models --local` beendet mit `0`, wenn kein Server antwortet; der Exit-Code eignet sich also nicht zur Erkennung.
+
+Um herauszufinden, *warum* ein Lauf fehlgeschlagen ist, lesen Sie das Feld `error` jedes Ergebnisses aus der JSON-Ausgabe - es enthält die Meldung des Providers, wobei zugangsdatenähnliche Zeichenketten redigiert werden:
+
+```bash
+cli-modelarium batch ./eval/test_suite.json \
+  --models gpt-5.5,claude-opus-4-7 \
+  --output-format json --output results.json
+code=$?
+if [ "$code" -eq 2 ]; then
+  jq -r '.results[] | select(.error) | "\(.model): \(.error)"' results.json
+fi
+```
+
+`--output-format json` ist erforderlich - die Standardausgabe enthält kein maschinenlesbares Fehlerfeld. Beachten Sie: Fehler, die *vor* dem ersten Modellaufruf auftreten (fehlender Schlüssel, unbekanntes Modell, fehlerhafte Batch-Datei), erzeugen überhaupt kein JSON; dort ist die Konsolenmeldung das einzige Signal.
+
+**Datenschutzhinweis:** Die JSON-Ausgabe enthält den vollständigen Prompt und die vollständige Modellantwort jedes Ergebnisses sowie eventuelle Provider-Fehlermeldungen. Behandeln Sie `results.json` als sensibel, bevor Sie es committen oder als öffentliches CI-Artefakt hochladen.
+
 ## Konfiguration
 
 ### API-Schlüssel
@@ -266,8 +297,8 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | xAI (Grok 4.3, usw.) | ✅ | ✅ | ✅ |
 | DeepSeek (V4 Pro, V4 Flash, usw.) | ✅ | ✅ | ✅ |
 | Mistral (Large, Medium, Small) | ✅ | ✅ | ✅ |
-| Groq (Llama, Mixtral, usw.) | ✅ | ✅ | ✅ |
-| OpenRouter (jedes Modell auf der Plattform) | ✅ | ✅ | ✅ |
+| Groq (Llama 3.3, Llama 4 Scout, gpt-oss) | ✅ | ✅ | ✅ |
+| OpenRouter (8 registrierte IDs: Qwen, DeepSeek R1, Llama 3.3, gpt-oss, GLM) | ✅ | ✅ | ✅ |
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, usw.; ausgewählte Qwen-Modelle, International/Singapur) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air, usw.; OpenAI-kompatibel, Overseas-Endpunkt) | ✅ | ✅ | ✅ |
 | **Lokal: Ollama** | ❌ | ✅ | Kostenlos |
@@ -279,7 +310,7 @@ Führen Sie `cli-modelarium list-models` aus, um alle derzeit unterstützten Mod
 
 ## Modellgruppen
 
-Anstatt Modell-IDs aufzulisten, akzeptiert `--models` ein Gruppenkürzel. Gruppen werden gegen die von Ihnen konfigurierten Anbieter gefiltert, sodass eine Gruppe immer nur die Modelle ausführt, für die Sie tatsächlich Schlüssel besitzen.
+Anstatt Modell-IDs aufzulisten, akzeptiert `--models` ein Gruppenkürzel. Statische Gruppen werden unverändert expandiert: Jedes unten aufgeführte Mitglied wird ausgeführt, Sie benötigen also einen Schlüssel für jeden Anbieter, den die Gruppe umfasst, und der Lauf bricht beim ersten fehlenden Schlüssel ab. Die dynamischen Gruppen `all` und `all-local` sind die Ausnahme - diese werden gegen das aufgelöst, was Sie tatsächlich konfiguriert haben.
 
 **Statische Gruppen** (feste Zusammensetzung):
 
@@ -287,10 +318,9 @@ Anstatt Modell-IDs aufzulisten, akzeptiert `--models` ein Gruppenkürzel. Gruppe
 |-------|--------|
 | `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
-| `all-reasoning` | o3, o4-mini, deepseek-reasoner, magistral-medium-latest, magistral-small-latest, glm-5.2 |
-| `all-fast` | claude-haiku-4-5, gemini-3.5-flash, grok-4.20-0309-non-reasoning, deepseek-v4-flash, llama-3.3-70b-versatile, qwen3.6-flash, glm-5-turbo |
+| `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
-| `all-open-weight` | gpt-oss-120b, gpt-oss-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
+| `all-open-weight` | openai/gpt-oss-120b, openai/gpt-oss-safeguard-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
 
 **Dynamische Gruppen** (zur Laufzeit aufgelöst):
 
@@ -307,7 +337,7 @@ cli-modelarium "Erkläre das CAP-Theorem" --models all-local
 
 Cli Modelarium verwendet eine modulare Anbieter-Abstraktionsschicht, die die API-Unterschiede zwischen OpenAIs `messages`-Array, Anthropics `system`-Parameter auf oberster Ebene, Googles `system_instruction` und anderen verbirgt. Jeder Anbieter implementiert dasselbe asynchrone Streaming-Interface, sodass die CLI sie alle parallel mit `asyncio.gather()` ausführen kann.
 
-Kostenberechnungen stammen aus dem von jedem Anbieter gemeldeten `usage`-Feld (Input-Tokens, Output-Tokens, gecachte Tokens), multipliziert mit aktuellen Preiskonstanten. Preisdaten wurden am **22. Juni 2026** aus der offiziellen Anbieterdokumentation überprüft - siehe [Hinweise und Einschränkungen](#hinweise-und-einschränkungen) für Vorbehalte.
+Kostenberechnungen stammen aus dem von jedem Anbieter gemeldeten `usage`-Feld (Input-Tokens, Output-Tokens, gecachte Tokens), multipliziert mit aktuellen Preiskonstanten. Preisdaten wurden am **29. Juli 2026** aus der offiziellen Anbieterdokumentation überprüft - siehe [Hinweise und Einschränkungen](#hinweise-und-einschränkungen) für Vorbehalte.
 
 Für lokale Modelle wird dasselbe OpenAI Python SDK mit einer benutzerdefinierten `base_url` verwendet, da Ollama, LM Studio, vLLM und llama.cpp alle OpenAI-kompatible REST-Endpunkte bereitstellen.
 
@@ -315,7 +345,7 @@ Für lokale Modelle wird dasselbe OpenAI Python SDK mit einer benutzerdefinierte
 
 ### Preisdaten
 
-Alle in Cli Modelarium integrierten Preise wurden am **22. Juni 2026** aus der offiziellen Anbieterdokumentation überprüft. LLM-Preise ändern sich häufig (manchmal monatlich). Das Tool zeigt das `pricing_as_of`-Datum in jeder Ausgabe an. Überprüfen Sie immer die offizielle Preisseite jedes Anbieters, bevor Sie sich für Budgetierung oder Produktionsentscheidungen auf Kostenberechnungen verlassen.
+Alle in Cli Modelarium integrierten Preise wurden am **29. Juli 2026** aus der offiziellen Anbieterdokumentation überprüft. Die Z.AI/GLM-Preise sind die einzige Ausnahme: Sie tragen ein früheres Überprüfungsdatum vom **22. Juni 2026**, waren nicht Teil des letzten Durchgangs, und ihre Einträge sind seitdem unverändert. LLM-Preise ändern sich häufig (manchmal monatlich). Das `pricing_as_of`-Datum ist in der JSON-Ausgabe enthalten und wird in der Konsole angezeigt; die CSV- und Markdown-Ausgabe enthält es nicht. Überprüfen Sie immer die offizielle Preisseite jedes Anbieters, bevor Sie sich für Budgetierung oder Produktionsentscheidungen auf Kostenberechnungen verlassen.
 
 Die Preise sind der jeweilige Standard-/Listenpreis jedes Anbieters pro 1 Mio. Tokens (nicht Batch-, Priority-, Off-Peak- oder Aktionspreise); bei Modellen mit nach Eingabegröße gestaffelten Preisen wird die Einstiegs-/Kurzkontext-Stufe angezeigt, und der Cache-Preis entspricht dem Cache-Read-Tarif. Die Kosten für DashScope/Qwen spiegeln die Nicht-Thinking-Tarife wider (das Tool sendet `enable_thinking=false`).
 
@@ -327,7 +357,7 @@ Die Rate-Limit-Handhabung und die Standard-Concurrency-Einstellungen pro Anbiete
 
 ### Modellverfügbarkeit
 
-Die von Cli Modelarium unterstützten Modelle spiegeln wider, was Anbieter am **21. Juni 2026** angeboten haben. Anbieter veröffentlichen regelmäßig neue Modelle, veralten ältere und passen Fähigkeiten an. Wenn ein Modell in der Registry nicht mehr funktioniert, führen Sie `cli-modelarium list-models` aus und überprüfen Sie die Dokumentation des Anbieters.
+Die von Cli Modelarium unterstützten Modelle spiegeln wider, was Anbieter am **29. Juli 2026** angeboten haben. Anbieter veröffentlichen regelmäßig neue Modelle, veralten ältere und passen Fähigkeiten an. Wenn ein Modell in der Registry nicht mehr funktioniert, führen Sie `cli-modelarium list-models` aus und überprüfen Sie die Dokumentation des Anbieters.
 
 ### Kein produktionsreifes Gateway
 
@@ -354,10 +384,12 @@ Das Halluzinationserkennungs-Preset ist ein nützliches Vergleichssignal zwische
 LLMs sind bei Temperatur > 0 nicht deterministisch - das erneute Ausführen desselben Prompts kann unterschiedliche Ausgaben erzeugen. Ein einzelner Vergleichsdurchlauf zeigt Ihnen EINE Stichprobe von jedem Modell, kein endgültiges Qualitätsurteil.
 
 Um zuverlässigere Schlussfolgerungen zu ziehen:
-- Verwenden Sie `--temperatures 0` für deterministischere Ausgaben (wo unterstützt)
+- Verwenden Sie `--temperatures 0` für deterministischere Ausgaben. Einige Modelle akzeptieren überhaupt keine Temperatureinstellung - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5` und `gpt-5.5`. Das Tool lässt das Feld für diese Modelle weg, damit der Aufruf dennoch gelingt, und sie laufen stattdessen mit dem Standardwert ihres Anbieters.
 - Führen Sie denselben Vergleich 3-5 Mal aus und suchen Sie nach Mustern
 - Vergleichen Sie über mehrere Prompts hinweg, nicht nur einen
 - Verwenden Sie das `--output json`-Flag, um Durchläufe für systematische Analyse zu speichern
+
+Diese neun Modelle werden ohne das Temperaturfeld aufgerufen, und `models_without_temperature` in der JSON-Ausgabe nennt die in einem bestimmten Lauf betroffenen Modelle. Drei Konsequenzen sollten Sie kennen. Ein `--temperatures`-Durchlauf mit mehreren Werten sendet bei diesen Modellen identische Anfragen statt einer echten Reihe, und das Tool gibt in diesem Fall eine Warnung aus. Die in der Ergebnistabelle, in der CSV-Datei und in jedem JSON-Ergebnisdatensatz angezeigte Temperatur ist der **angeforderte** Wert, nicht der angewendete. Und bei `--significance` kann dies eine Schlussfolgerung verändern statt nur eine Bezeichnung: Vergleicht man ein Modell, das die Temperatur weglässt, mit einem, das sie berücksichtigt, entsteht ein Varianzunterschied, der ein Stichprobenartefakt ist - Welch oder Mann-Whitney melden ihn jedoch, als wäre er ein Qualitätsunterschied zwischen den Modellen. Dieser Fall wird gemeldet: Jeder Signifikanzlauf, der ein betroffenes mit einem nicht betroffenen Modell mischt, gibt ein `Temperature not applied`-Panel aus, das die auf dem Provider-Standard laufenden Modelle benennt, und setzt `significance_temperature_mixed` in der JSON-Ausgabe auf `true`. Ein Lauf mit mehreren Temperaturen, der zugleich gemischt ist, erhält beide Meldungen in einem einzigen Panel. Die CSV-Ausgabe enthält kein entsprechendes Signal.
 
 ## Über den Autor
 
