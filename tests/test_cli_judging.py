@@ -121,16 +121,18 @@ class TestJudgeFlag:
                 "--models",
                 "gpt-5.5",
                 "--judge",
-                "claude-opus-4-7",
+                "claude-sonnet-4-6",
                 "--no-stream",
                 "--no-judge-tos",  # suppress ToS panel for cleaner output
             ],
         )
 
         assert result.exit_code == 0, result.output
-        # 1 main call (gpt-5.5) + 1 judge call (claude-opus-4-7).
+        # 1 main call (gpt-5.5) + 1 judge call (claude-sonnet-4-6).
         assert len(dual_provider.calls) == 2
-        # The judge call must use temperature 0.0.
+        # A judge model that ACCEPTS temperature must be pinned to 0.0.
+        # Models that reject it are covered by the omission test in
+        # tests/test_temperature_predicate.py.
         judge_calls = [c for c in dual_provider.calls if c["is_judge_call"]]
         assert len(judge_calls) == 1
         assert judge_calls[0]["temperature"] == 0.0
@@ -351,7 +353,8 @@ class TestToSPanel:
         )
 
         assert result.exit_code == 0
-        # The build prompt's verbatim wording.
+        # Pinned wording: this is a ToS disclosure, not UI copy to be
+        # softened or reworded freely.
         assert "Judge scores are for evaluation only" in result.output
         assert "competing AI models" in result.output
         assert "ToS" in result.output
