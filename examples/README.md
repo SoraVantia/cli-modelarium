@@ -17,7 +17,7 @@
 
 - `model_groups.sh` - Run a curated model group with one flag
   (`--models all-budget`; static groups: all-premium/all-flagship, all-budget,
-  all-reasoning, all-fast, all-cheap, all-open-weight)
+  all-reasoning, all-cheap, all-open-weight)
 - `compare_all_providers.sh` - Compare every cloud model you have a key for
   (`--models all`), cost-capped with `--max-cost`
 - `local_models_discovery.sh` - Compare all models from a running local server
