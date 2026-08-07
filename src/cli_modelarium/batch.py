@@ -49,7 +49,13 @@ from cli_modelarium.streaming import (
     _call_with_retry,
 )
 
-# Safety caps. The build prompt sets these; --force-large bypasses both.
+# Safety caps against a runaway matrix. Batch size is prompts x models x
+# temperatures x system prompts, so a mistyped --models turns a 20-prompt
+# file into thousands of billable calls before the first result lands. Both
+# are checked up front; --force-large skips them, --max-cost still applies.
+#
+# The numbers are arbitrary. Raise them if they're wrong for you - rate
+# limits bind long before anything else does.
 MAX_PROMPTS_PER_BATCH = 1000
 MAX_TOTAL_CALLS = 10_000
 
