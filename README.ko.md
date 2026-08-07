@@ -7,7 +7,7 @@
 
 참고: 이 README는 접근성을 위해 번역되었습니다. Cli Modelarium CLI 도구 자체는 영어로만 출력됩니다. 모든 명령, 오류 메시지 및 출력은 시스템 로케일에 관계없이 영어로 유지됩니다.
 
-> Note: Features added after v0.1.0 (`--runs` in v0.1.1, statistical significance in v0.1.2, confidence intervals/paired tests/McNemar in v0.1.3) are documented in English only — translations pending.
+> 참고: 다음 일곱 개 섹션은 영어 README 에만 있습니다 — *Reproducibility analysis*, *Statistical significance testing*, *Bootstrap confidence intervals*, *Paired tests for same-prompt comparisons*, *McNemar's test for hallucination significance*, *Headless Linux servers*, *More examples*. 기능 자체는 모두 사용할 수 있으며, 여기에 없는 것은 해당 설명뿐입니다. [README.md](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.md) 를 참조하십시오.
 
 > 터미널에서 LLM 출력을 나란히 비교 - 10개 클라우드 제공자 + 로컬 모델, 병렬 스트리밍, 배치 평가, LLM-as-judge 스코어링, 환각 감지 및 CI/CD 지원 어설션 포함.
 
@@ -209,6 +209,37 @@ cli-modelarium "Summarize the key features of microservices architecture" \
 
 통과율이 90% 미만으로 떨어지면 명령이 종료 코드 1로 종료되어 빌드가 실패합니다.
 
+#### 종료 코드
+
+| 코드 | 의미 |
+|------|------|
+| `0` | 성공. |
+| `1` | 어서션 실패 - 하나 이상의 어서션이 통과하지 못했습니다. `batch` 전용이며, `compare` 에는 어서션이 없습니다. |
+| `2` | 실행을 완료하지 못했습니다. |
+
+코드 `2` 는 서로 다른 여러 원인을 포괄하며 **그 원인을 구분하지 않습니다.** API 키 누락, 알 수 없는 모델, 지원이 종료된 모델, 제공업체 오류, 비용 상한 초과, 잘못된 형식의 배치 파일, 허용되지 않는 플래그 조합, 출력 파일 충돌, 배치 크기 상한 초과가 모두 코드 `2` 가 됩니다.
+
+파이프라인을 이 코드에 의존시키기 전에 알아 둘 규칙이 두 가지 있습니다.
+
+- **호출 실패가 어서션보다 우선합니다.** 모델 호출이 하나라도 실패하면 `batch` 는 어서션 결과를 보고하지 않고 `2` 로 종료합니다. 어서션도 함께 실패한 경우에도 마찬가지입니다. 실패한 테스트 스위트와 잘못된 API 키는 종료 코드만으로는 구분되지 않습니다.
+- **로컬 서버에 연결할 수 없는 것은 실패가 아닙니다.** 응답하는 서버가 없어도 `list-models --local` 은 `0` 으로 종료하므로, 종료 코드로 서버 존재 여부를 판단할 수 없습니다.
+
+실행이 *왜* 실패했는지 확인하려면 JSON 출력에서 각 결과의 `error` 필드를 읽으십시오. 제공업체의 메시지가 담기며, 자격 증명처럼 보이는 문자열은 가려집니다.
+
+```bash
+cli-modelarium batch ./eval/test_suite.json \
+  --models gpt-5.5,claude-opus-4-7 \
+  --output-format json --output results.json
+code=$?
+if [ "$code" -eq 2 ]; then
+  jq -r '.results[] | select(.error) | "\(.model): \(.error)"' results.json
+fi
+```
+
+`--output-format json` 이 필요합니다. 기본 출력에는 기계가 읽을 수 있는 오류 필드가 없습니다. 모델을 호출하기 *전에* 발생한 실패(키 누락, 알 수 없는 모델, 잘못된 배치 파일)에서는 JSON이 전혀 생성되지 않으므로, 그런 경우에는 콘솔 메시지가 유일한 신호입니다.
+
+**개인정보 관련 참고:** JSON 출력에는 각 결과의 전체 프롬프트와 전체 모델 응답, 그리고 제공업체의 오류 메시지가 포함됩니다. `results.json` 을 커밋하거나 공개 CI 아티팩트로 업로드하기 전에 민감한 정보로 취급하십시오.
+
 ## 구성
 
 ### API 키
@@ -266,8 +297,8 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | xAI (Grok 4.3 등) | ✅ | ✅ | ✅ |
 | DeepSeek (V4 Pro, V4 Flash 등) | ✅ | ✅ | ✅ |
 | Mistral (Large, Medium, Small) | ✅ | ✅ | ✅ |
-| Groq (Llama, Mixtral 등) | ✅ | ✅ | ✅ |
-| OpenRouter (플랫폼의 모든 모델) | ✅ | ✅ | ✅ |
+| Groq (Llama 3.3, Llama 4 Scout, gpt-oss) | ✅ | ✅ | ✅ |
+| OpenRouter (등록된 8개 ID: Qwen, DeepSeek R1, Llama 3.3, gpt-oss, GLM) | ✅ | ✅ | ✅ |
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder 등; 일부 Qwen 모델, International/Singapore) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air 등; OpenAI 호환, 해외 엔드포인트) | ✅ | ✅ | ✅ |
 | **로컬: Ollama** | ❌ | ✅ | 무료 |
@@ -279,7 +310,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 
 ## 모델 그룹
 
-모델 ID를 나열하는 대신 `--models`는 그룹 단축어를 받습니다. 그룹은 사용자가 구성한 제공자를 기준으로 필터링되므로, 그룹은 실제로 키를 보유한 모델만 실행합니다.
+모델 ID를 나열하는 대신 `--models`는 그룹 단축어를 받습니다. 정적 그룹은 그대로 확장됩니다. 아래에 나열된 모든 구성원이 실행되므로 그룹이 포함하는 각 제공자의 키가 필요하며, 키가 없는 첫 번째 지점에서 실행이 중단됩니다. 동적 그룹인 `all`과 `all-local`은 예외로, 이들은 실제로 구성된 항목을 기준으로 확인됩니다.
 
 **정적 그룹** (고정 멤버십):
 
@@ -287,10 +318,9 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 |-------|--------|
 | `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
-| `all-reasoning` | o3, o4-mini, deepseek-reasoner, magistral-medium-latest, magistral-small-latest, glm-5.2 |
-| `all-fast` | claude-haiku-4-5, gemini-3.5-flash, grok-4.20-0309-non-reasoning, deepseek-v4-flash, llama-3.3-70b-versatile, qwen3.6-flash, glm-5-turbo |
+| `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
-| `all-open-weight` | gpt-oss-120b, gpt-oss-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
+| `all-open-weight` | openai/gpt-oss-120b, openai/gpt-oss-safeguard-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
 
 **동적 그룹** (런타임에 확인됨):
 
@@ -307,7 +337,7 @@ cli-modelarium "CAP 정리를 설명하세요" --models all-local
 
 Cli Modelarium은 OpenAI의 `messages` 배열, Anthropic의 최상위 `system` 매개변수, Google의 `system_instruction` 등 API 간의 차이를 숨기는 모듈식 제공자 추상화 계층을 사용합니다. 모든 제공자가 동일한 비동기 스트리밍 인터페이스를 구현하므로 CLI는 `asyncio.gather()`로 모든 제공자를 병렬로 실행할 수 있습니다.
 
-비용 계산은 각 제공자의 보고된 `usage` 필드(입력 토큰, 출력 토큰, 캐시된 토큰)에 현재 가격 상수를 곱하여 산출됩니다. 가격 데이터는 **2026년 6월 22일**에 공식 제공자 문서에서 검증되었습니다 - 주의사항은 [참고사항 및 제한사항](#참고사항-및-제한사항)을 참조하십시오.
+비용 계산은 각 제공자의 보고된 `usage` 필드(입력 토큰, 출력 토큰, 캐시된 토큰)에 현재 가격 상수를 곱하여 산출됩니다. 가격 데이터는 **2026년 7월 29일**에 공식 제공자 문서에서 검증되었습니다 - 주의사항은 [참고사항 및 제한사항](#참고사항-및-제한사항)을 참조하십시오.
 
 로컬 모델의 경우 Ollama, LM Studio, vLLM 및 llama.cpp 모두 OpenAI 호환 REST 엔드포인트를 노출하므로 사용자 정의 `base_url`과 함께 동일한 OpenAI Python SDK가 사용됩니다.
 
@@ -315,7 +345,7 @@ Cli Modelarium은 OpenAI의 `messages` 배열, Anthropic의 최상위 `system` �
 
 ### 가격 데이터
 
-Cli Modelarium에 포함된 모든 가격은 **2026년 6월 22일**에 공식 제공자 문서에서 검증되었습니다. LLM 가격은 자주 변경됩니다(때로는 매월). 도구는 모든 출력에 `pricing_as_of` 날짜를 표시합니다. 예산 책정이나 프로덕션 결정을 위해 비용 계산에 의존하기 전에 항상 각 제공자의 공식 가격 페이지와 대조하여 확인하십시오.
+Cli Modelarium에 포함된 모든 가격은 **2026년 7월 29일**에 공식 제공자 문서에서 검증되었습니다. Z.AI/GLM 가격만 예외입니다. 이들은 **2026년 6월 22일**이라는 이전 검증 날짜를 유지하며 가장 최근 검증에 포함되지 않았고, 그 이후로 항목이 변경되지 않았습니다. LLM 가격은 자주 변경됩니다(때로는 매월). `pricing_as_of` 날짜는 JSON 출력에 포함되고 콘솔에 표시됩니다. CSV 및 Markdown 출력에는 포함되지 않습니다. 예산 책정이나 프로덕션 결정을 위해 비용 계산에 의존하기 전에 항상 각 제공자의 공식 가격 페이지와 대조하여 확인하십시오.
 
 가격은 각 제공자의 1M 토큰당 표준/정가 공개 요금입니다(배치, 우선순위, 오프피크 또는 프로모션 가격이 아님). 입력 크기별로 티어가 나뉘는 모델의 경우 진입/짧은 컨텍스트 티어가 표시되며, 캐시 가격은 캐시 읽기 요금입니다. DashScope/Qwen 비용은 비사고(non-thinking) 요금을 반영합니다(도구가 `enable_thinking=false`를 전송함).
 
@@ -327,7 +357,7 @@ Cli Modelarium에 포함된 모든 가격은 **2026년 6월 22일**에 공식 �
 
 ### 모델 가용성
 
-Cli Modelarium에서 지원하는 모델은 **2026년 6월 21일**에 제공자가 제공한 것을 반영합니다. 제공자는 정기적으로 새 모델을 출시하고 오래된 모델을 폐기하며 기능을 조정합니다. 레지스트리의 모델이 더 이상 작동하지 않으면 `cli-modelarium list-models`를 실행하고 제공자의 문서를 확인하십시오.
+Cli Modelarium에서 지원하는 모델은 **2026년 7월 29일**에 제공자가 제공한 것을 반영합니다. 제공자는 정기적으로 새 모델을 출시하고 오래된 모델을 폐기하며 기능을 조정합니다. 레지스트리의 모델이 더 이상 작동하지 않으면 `cli-modelarium list-models`를 실행하고 제공자의 문서를 확인하십시오.
 
 ### 프로덕션 등급 게이트웨이가 아님
 
@@ -354,10 +384,12 @@ Cli Modelarium에는 `--judge` 플래그로 활성화되는 선택적 LLM-as-a-j
 LLM은 온도 > 0에서 비결정론적입니다 - 동일한 프롬프트를 다시 실행하면 다른 출력이 생성될 수 있습니다. 단일 비교 실행은 각 모델에서 하나의 샘플을 보여줄 뿐이지 결정적인 품질 판정이 아닙니다.
 
 더 신뢰할 수 있는 결론을 도출하려면:
-- 더 결정론적인 출력을 위해 `--temperatures 0` 사용 (지원되는 경우)
+- 더 결정론적인 출력을 위해 `--temperatures 0` 사용. 일부 모델은 온도 설정을 전혀 받아들이지 않습니다 - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`입니다. 도구는 이러한 모델에 대해 해당 필드를 생략하여 호출이 성공하도록 하며, 이 모델들은 제공자의 기본값으로 실행됩니다.
 - 동일한 비교를 3-5회 실행하고 패턴을 찾기
 - 하나가 아닌 여러 프롬프트에 걸쳐 비교
 - 체계적 분석을 위해 실행 결과를 저장하려면 `--output json` 플래그 사용
+
+이 아홉 개 모델은 온도 필드 없이 호출되며, JSON 출력의 `models_without_temperature`가 해당 실행에서 영향을 받은 모델을 나열합니다. 알아두어야 할 결과가 세 가지 있습니다. 여러 값을 지정한 `--temperatures` 스윕은 이러한 모델에 대해 실제 스윕이 아니라 동일한 요청을 보내며, 이 경우 도구가 경고를 출력합니다. 결과 테이블, CSV, 각 JSON 결과 레코드에 표시되는 온도는 실제로 적용된 값이 아니라 **요청된** 값입니다. 그리고 `--significance`는 이것이 라벨이 아니라 결론 자체를 바꿀 수 있는 지점입니다. 온도를 생략하는 모델과 온도를 반영하는 모델을 비교하면 표본 추출로 인한 분산 차이가 생기는데, Welch나 Mann-Whitney는 이를 모델 품질 차이인 것처럼 보고합니다. 이 경우에도 경고가 표시됩니다. 영향을 받는 모델과 받지 않는 모델을 섞은 유의성 검정은 제공업체 기본 온도로 실행된 모델의 이름을 명시한 `Temperature not applied` 패널을 출력하고, JSON 출력의 `significance_temperature_mixed`를 `true`로 설정합니다. 여러 온도를 사용하면서 동시에 혼합된 실행에서는 두 메시지가 하나의 패널에 함께 표시됩니다. CSV에는 이에 상응하는 신호가 없습니다.
 
 ## 저자 소개
 
