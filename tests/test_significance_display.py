@@ -51,12 +51,12 @@ def _make_result(
 
 
 @pytest.fixture
-def captured_console(monkeypatch: pytest.MonkeyPatch) -> io.StringIO:
-    """Swap cli.console with a Rich Console that writes to a StringIO buffer."""
-    buf = io.StringIO()
-    test_console = Console(file=buf, force_terminal=False, width=200)
-    monkeypatch.setattr(cli_module, "console", test_console)
-    return buf
+def captured_console(
+    monkeypatch: pytest.MonkeyPatch, capture_console: Console
+) -> io.StringIO:
+    """Swap cli.console for the width-pinned shared Console from conftest."""
+    monkeypatch.setattr(cli_module, "console", capture_console)
+    return capture_console.file  # type: ignore[return-value]
 
 
 class TestTwoModelSingleLine:
