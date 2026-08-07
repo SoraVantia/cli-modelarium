@@ -11,8 +11,12 @@ Three concerns:
        parallel under per-judge-provider semaphores, with self-evaluation
        auto-skip and aggregation across the panel.
 
-The judge call itself uses `temperature=0.0` always - deterministic scoring
-makes the panel comparable across runs.
+The judge call requests `temperature=0.0` so scoring is deterministic and the
+panel stays comparable across runs. That guarantee is NOT unconditional: a few
+provider models reject a non-default temperature outright, so the field is
+omitted for them and they run at the provider default instead. Those judges are
+recorded in `JudgeResult.degraded_models` and surfaced in the console, JSON and
+markdown output rather than being silently absorbed.
 """
 
 from __future__ import annotations
@@ -29,18 +33,23 @@ from rich.panel import Panel
 
 from cli_modelarium.exceptions import ModelariumError
 from cli_modelarium.models_registry import get_provider_for_model
+from cli_modelarium.pricing import rejects_sampling_params
 from cli_modelarium.providers.base import BaseProvider
 from cli_modelarium.security import redact_secrets
 from cli_modelarium.streaming import StreamState
 
-# Defaults the user picked in the build prompt.
+# Default rubric. Changing these changes what every unscored run measures,
+# so scores are only comparable across runs that used the same criteria.
 DEFAULT_CRITERIA: tuple[str, ...] = (
     "Accuracy: Is the response factually correct?",
     "Helpfulness: Does it actually address what was asked?",
     "Clarity: Is the explanation clear and well-structured?",
 )
 
-# The exact wording from the build prompt. `{criteria}`, `{prompt}`, and
+# The template is fixed deliberately: judge scores are only comparable
+# across runs that used identical wording, so edits here silently
+# invalidate comparisons against previously recorded results. Pass
+# --judge-template to vary it per run instead. `{criteria}`, `{prompt}`, and
 # `{response}` are the three substitution points. Double `{{` / `}}` escape
 # the JSON braces so str.format doesn't try to interpret them.
 JUDGE_PROMPT_TEMPLATE = """You are evaluating an AI assistant's response. \
@@ -80,7 +89,7 @@ class JudgeScore:
     cost_usd: float
     latency_ms: float
     parse_error: str | None = None
-    # Phase 10 hallucination preset: when the custom parser extracts a
+    # Hallucination preset: when the custom parser extracts a
     # Low/Medium/High classification, it lands here. None for normal judging.
     risk_level: str | None = None
 
@@ -95,7 +104,11 @@ class JudgeResult:
     # Models that were skipped due to self-evaluation - tracked so callers
     # can surface that information in the display.
     skipped_models: list[str] = field(default_factory=list)
-    # Phase 10 hallucination preset: worst-case aggregation across the panel
+    # Judge models whose determinism guarantee could not be met: they reject a
+    # non-default temperature, so the field was omitted and they ran at the
+    # provider default. Surfaced in console, JSON and markdown output.
+    degraded_models: list[str] = field(default_factory=list)
+    # Hallucination preset: worst-case aggregation across the panel
     # (any High -> High; else any Medium -> Medium; else Low; else None).
     # Populated by hallucination.annotate_risk_levels(), not _aggregate.
     aggregated_risk_level: str | None = None
@@ -285,7 +298,7 @@ async def score_with_judge(
 ) -> JudgeScore:
     """Run one judge model on one response, returning a JudgeScore.
 
-    `response_parser` defaults to `parse_judge_response`. Phase 10's
+    `response_parser` defaults to `parse_judge_response`. The
     hallucination preset passes `parse_hallucination_response` here to
     extract the risk_level field alongside score/reasoning.
 
@@ -298,6 +311,12 @@ async def score_with_judge(
     judge_prompt = build_judge_prompt(original_prompt, response_to_eval, criteria, template)
     start = time.monotonic()
     try:
+        # Always request 0.0 here: omission happens one layer down, in the
+        # provider's request builder (Sections 2 and 3), which drops the field
+        # from the wire for models that reject it. Passing it through keeps
+        # BaseProvider.complete()'s signature intact, per the DO NOT list.
+        # Judges that end up running at the provider default are recorded in
+        # JudgeResult.degraded_models by the caller.
         result = await judge_provider.complete(
             prompt=judge_prompt,
             model=judge_model,
@@ -418,12 +437,18 @@ async def run_judging(
             )
 
         judges: list[JudgeScore] = list(await asyncio.gather(*tasks)) if tasks else []
-        return _aggregate(judges, skipped_models=skipped)
+        degraded = [j.model for j in judges if rejects_sampling_params(j.model)]
+        return _aggregate(judges, skipped_models=skipped, degraded_models=degraded)
 
     return list(await asyncio.gather(*[_score_state(state, prompt) for state, prompt in items]))
 
 
-def _aggregate(judges: list[JudgeScore], *, skipped_models: list[str] | None = None) -> JudgeResult:
+def _aggregate(
+    judges: list[JudgeScore],
+    *,
+    skipped_models: list[str] | None = None,
+    degraded_models: list[str] | None = None,
+) -> JudgeResult:
     """Compute average and std_dev across successfully-scored judges."""
     successful = [j for j in judges if j.score is not None]
     if successful:
@@ -438,6 +463,7 @@ def _aggregate(judges: list[JudgeScore], *, skipped_models: list[str] | None = N
         average_score=average,
         std_dev=std,
         skipped_models=list(skipped_models or []),
+        degraded_models=list(degraded_models or []),
     )
 
 
@@ -448,7 +474,7 @@ def print_tos_disclosure(console: Console) -> None:
     """Print the judge-use ToS reminder as a yellow panel.
 
     Always shown when judging is enabled unless --no-judge-tos is passed.
-    The wording is the build prompt's verbatim text.
+    The wording is fixed; --no-judge-tos suppresses the panel entirely.
     """
     console.print(
         Panel(
