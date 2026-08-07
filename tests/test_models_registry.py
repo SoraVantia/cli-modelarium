@@ -15,6 +15,7 @@ from cli_modelarium.models_registry import (
     list_models_for_provider,
     parse_models_arg,
 )
+from cli_modelarium.pricing import PRICING, RETIRED_MODELS
 
 
 class TestGetProviderForModel:
@@ -74,8 +75,8 @@ class TestAllKnownProviders:
             "dashscope",
             "local",
         }
-        # The registry should contain at least the 8 cloud providers + local.
-        # (Phase 3 will add openrouter; for now assert what's present.)
+        # Subset, not equality: the registry has grown past this list
+        # (openrouter and zai are also present) and will grow again.
         assert expected.issubset(providers)
 
 
@@ -170,3 +171,38 @@ class TestGroupCoverage:
     )
     def test_user_promised_groups_exist(self, group_name: str) -> None:
         assert group_name in MODEL_GROUPS
+
+
+class TestGroupMembershipInvariant:
+    """Every static group member must be a live PRICING entry.
+
+    No test pinned group membership before 0.1.5, which is exactly why
+    deepseek-reasoner sat dead in all-reasoning against a fully green suite.
+    This turns that one-time fix into a standing invariant.
+    """
+
+    STATIC_GROUPS = sorted(set(MODEL_GROUPS) - set(DYNAMIC_GROUPS))
+
+    @pytest.mark.parametrize("group", STATIC_GROUPS)
+    def test_every_member_exists_in_pricing(self, group: str) -> None:
+        missing = [m for m in MODEL_GROUPS[group] if m not in PRICING]
+        assert not missing, f"{group} references models with no pricing entry: {missing}"
+
+    @pytest.mark.parametrize("group", STATIC_GROUPS)
+    def test_no_member_is_retired(self, group: str) -> None:
+        retired = [m for m in MODEL_GROUPS[group] if m in RETIRED_MODELS]
+        assert not retired, f"{group} references provider-retired models: {retired}"
+
+    @pytest.mark.parametrize("group", STATIC_GROUPS)
+    def test_group_is_non_empty(self, group: str) -> None:
+        assert MODEL_GROUPS[group], f"{group} is empty but not declared dynamic"
+
+    def test_invariant_would_catch_a_missing_id(self) -> None:
+        # Guard against the assertion silently passing on an empty list.
+        bogus = [*MODEL_GROUPS["all-reasoning"], "definitely-not-a-model"]
+        assert [m for m in bogus if m not in PRICING] == ["definitely-not-a-model"]
+
+    def test_all_reasoning_uses_live_deepseek_id(self) -> None:
+        # 0.1.5 repointed this slot off the retired deepseek-reasoner alias.
+        assert "deepseek-v4-pro" in MODEL_GROUPS["all-reasoning"]
+        assert "deepseek-reasoner" not in MODEL_GROUPS["all-reasoning"]
