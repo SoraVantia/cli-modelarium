@@ -1,8 +1,8 @@
 """Path safety helpers for user-provided input files.
 
 Used by:
-    * --system-prompt-file (Phase 6)
-    * batch input files (Phase 7)
+    * --system-prompt-file
+    * batch input files
 
 Security model
 ==============
@@ -30,7 +30,7 @@ from pathlib import Path
 # (a typical system prompt is well under 10 KB) while preventing OOM.
 SYSTEM_PROMPT_MAX_BYTES = 1_000_000  # 1 MB
 
-# Phase 7 batch files can be larger - bumped to 10 MB.
+# Batch input files can be larger - bumped to 10 MB.
 BATCH_INPUT_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
