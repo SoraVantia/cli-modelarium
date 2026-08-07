@@ -7,7 +7,7 @@
 
 注意: 此 README 是为了可访问性而翻译的。Cli Modelarium CLI 工具本身仅输出英文。无论系统区域设置如何，所有命令、错误消息和输出均保持英文。
 
-> Note: Features added after v0.1.0 (`--runs` in v0.1.1, statistical significance in v0.1.2, confidence intervals/paired tests/McNemar in v0.1.3) are documented in English only — translations pending.
+> 注意：以下七个章节仅存在于英文 README 中 — *Reproducibility analysis*、*Statistical significance testing*、*Bootstrap confidence intervals*、*Paired tests for same-prompt comparisons*、*McNemar's test for hallucination significance*、*Headless Linux servers*、*More examples*。功能本身均可正常使用，此处缺少的只是它们的说明。请参阅 [README.md](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.md)。
 
 > 在终端中并排比较 LLM 输出 - 10 个云服务提供商 + 本地模型，支持并行流式传输、批量评估、LLM-as-judge 评分、幻觉检测和 CI/CD 就绪的断言。
 
@@ -209,6 +209,37 @@ cli-modelarium "Summarize the key features of microservices architecture" \
 
 如果通过率低于 90%，命令将以代码 1 退出，从而使构建失败。
 
+#### 退出代码
+
+| 代码 | 含义 |
+|------|------|
+| `0` | 成功。 |
+| `1` | 断言失败——一个或多个断言未通过。仅限 `batch`；`compare` 没有断言。 |
+| `2` | 运行未能完成。 |
+
+代码 `2` 涵盖多种不同的原因，并且**不区分它们**：缺少 API 密钥、未知模型、已停用的模型、提供商错误、超出成本上限、格式错误的批处理文件、被拒绝的标志组合、输出文件冲突，或超出批处理大小上限。
+
+在让流水线依赖这些代码之前，有两条规则值得了解：
+
+- **调用失败优先于断言。** 只要有一次模型调用失败，`batch` 就会以 `2` 退出而不报告断言结论，即便断言同样失败也是如此。从退出代码看，失败的测试套件和无效的 API 密钥并无区别。
+- **无法访问本地服务器不算失败。** 即使没有服务器响应，`list-models --local` 仍以 `0` 退出，因此无法用退出代码来检测服务器是否运行。
+
+若要了解运行*为何*失败，请读取 JSON 输出中每条结果的 `error` 字段——其中包含提供商的消息，形似凭据的字符串会被遮蔽：
+
+```bash
+cli-modelarium batch ./eval/test_suite.json \
+  --models gpt-5.5,claude-opus-4-7 \
+  --output-format json --output results.json
+code=$?
+if [ "$code" -eq 2 ]; then
+  jq -r '.results[] | select(.error) | "\(.model): \(.error)"' results.json
+fi
+```
+
+`--output-format json` 是必需的：默认输出不含任何机器可读的错误字段。请注意，在调用任何模型*之前*发生的失败（缺少密钥、未知模型、批处理文件有误）根本不会生成 JSON；此时控制台消息是唯一的信号。
+
+**隐私提示：** JSON 输出会嵌入每条结果的完整提示词和完整模型响应，以及提供商的任何错误消息。在提交 `results.json` 或将其作为公开 CI 产物上传之前，请将其视为敏感信息。
+
 ## 配置
 
 ### API 密钥
@@ -266,8 +297,8 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | xAI (Grok 4.3 等) | ✅ | ✅ | ✅ |
 | DeepSeek (V4 Pro, V4 Flash 等) | ✅ | ✅ | ✅ |
 | Mistral (Large, Medium, Small) | ✅ | ✅ | ✅ |
-| Groq (Llama, Mixtral 等) | ✅ | ✅ | ✅ |
-| OpenRouter (平台上的任何模型) | ✅ | ✅ | ✅ |
+| Groq (Llama 3.3, Llama 4 Scout, gpt-oss) | ✅ | ✅ | ✅ |
+| OpenRouter (已注册的 8 个 ID：Qwen、DeepSeek R1、Llama 3.3、gpt-oss、GLM) | ✅ | ✅ | ✅ |
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder 等；精选 Qwen 模型，国际/新加坡) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2、GLM-4.7、GLM-4.5 Air 等；OpenAI 兼容，海外端点) | ✅ | ✅ | ✅ |
 | **本地: Ollama** | ❌ | ✅ | 免费 |
@@ -279,7 +310,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 
 ## 模型组
 
-`--models` 接受组快捷方式，而无需逐一列出模型 ID。组会根据你已配置的提供商进行过滤，因此一个组只会运行你确实拥有密钥的那些模型。
+`--models` 接受组快捷方式，而无需逐一列出模型 ID。静态组会原样展开：下表列出的每个成员都会运行，因此该组涉及的每个提供商你都需要有密钥，一旦遇到第一个缺失的密钥，运行即中止。动态组 `all` 和 `all-local` 是例外，它们会根据你实际已配置的内容进行解析。
 
 **静态组**（成员固定）：
 
@@ -287,10 +318,9 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 |-------|--------|
 | `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
-| `all-reasoning` | o3, o4-mini, deepseek-reasoner, magistral-medium-latest, magistral-small-latest, glm-5.2 |
-| `all-fast` | claude-haiku-4-5, gemini-3.5-flash, grok-4.20-0309-non-reasoning, deepseek-v4-flash, llama-3.3-70b-versatile, qwen3.6-flash, glm-5-turbo |
+| `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
-| `all-open-weight` | gpt-oss-120b, gpt-oss-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
+| `all-open-weight` | openai/gpt-oss-120b, openai/gpt-oss-safeguard-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
 
 **动态组**（在运行时解析）：
 
@@ -307,7 +337,7 @@ cli-modelarium "解释 CAP 定理" --models all-local
 
 Cli Modelarium 使用模块化的提供商抽象层，隐藏了 OpenAI 的 `messages` 数组、Anthropic 的顶级 `system` 参数、Google 的 `system_instruction` 以及其他 API 之间的差异。每个提供商都实现了相同的异步流式接口，因此 CLI 可以使用 `asyncio.gather()` 并行运行它们。
 
-成本计算来自每个提供商报告的 `usage` 字段（输入令牌、输出令牌、缓存令牌）乘以当前定价常数。定价数据于 **2026 年 6 月 22 日** 从官方提供商文档中验证 - 详细注意事项请参阅 [注意事项与限制](#注意事项与限制)。
+成本计算来自每个提供商报告的 `usage` 字段（输入令牌、输出令牌、缓存令牌）乘以当前定价常数。定价数据于 **2026 年 7 月 29 日** 从官方提供商文档中验证 - 详细注意事项请参阅 [注意事项与限制](#注意事项与限制)。
 
 对于本地模型，使用相同的 OpenAI Python SDK 加上自定义 `base_url`，因为 Ollama、LM Studio、vLLM 和 llama.cpp 都暴露了 OpenAI 兼容的 REST 端点。
 
@@ -315,7 +345,7 @@ Cli Modelarium 使用模块化的提供商抽象层，隐藏了 OpenAI 的 `mess
 
 ### 定价数据
 
-Cli Modelarium 内置的所有定价均于 **2026 年 6 月 22 日** 从官方提供商文档中验证。LLM 定价经常变化（有时每月一次）。该工具在每个输出中显示 `pricing_as_of` 日期。在依赖成本计算进行预算或生产决策之前，请始终对照每个提供商的官方定价页面进行验证。
+Cli Modelarium 内置的所有定价均于 **2026 年 7 月 29 日** 从官方提供商文档中验证。Z.AI/GLM 的定价是唯一的例外：它们保留了较早的 **2026 年 6 月 22 日** 验证日期，未包含在最近一次验证中，自那时起其条目未发生变化。LLM 定价经常变化（有时每月一次）。`pricing_as_of` 日期包含在 JSON 输出中，并显示在控制台上；CSV 和 Markdown 输出不包含该日期。在依赖成本计算进行预算或生产决策之前，请始终对照每个提供商的官方定价页面进行验证。
 
 价格为每个提供商每 100 万令牌的标准/标价公开费率（非批量、优先、非高峰或促销定价）；对于按输入大小分层的模型，显示入门/短上下文层级，缓存定价为缓存读取费率。DashScope/Qwen 成本反映非思考费率（该工具发送 `enable_thinking=false`）。
 
@@ -327,7 +357,7 @@ Cli Modelarium 内置的所有定价均于 **2026 年 6 月 22 日** 从官方�
 
 ### 模型可用性
 
-Cli Modelarium 支持的模型反映了 **2026 年 6 月 21 日** 提供商提供的内容。提供商会定期发布新模型、弃用旧模型并调整能力。如果注册表中的模型不再工作，请运行 `cli-modelarium list-models` 并查看提供商的文档。
+Cli Modelarium 支持的模型反映了 **2026 年 7 月 29 日** 提供商提供的内容。提供商会定期发布新模型、弃用旧模型并调整能力。如果注册表中的模型不再工作，请运行 `cli-modelarium list-models` 并查看提供商的文档。
 
 ### 不是生产级网关
 
@@ -354,10 +384,12 @@ Cli Modelarium 包含可选的 LLM-as-a-judge 评分（通过 `--judge` 标志�
 LLM 在温度 > 0 时是非确定性的 - 重新运行相同的提示可能产生不同的输出。单次比较运行向您显示每个模型的一个样本，而不是最终的质量判决。
 
 要得出更可靠的结论:
-- 使用 `--temperatures 0` 获得更确定性的输出（在支持的地方）
+- 使用 `--temperatures 0` 获得更确定性的输出。部分模型完全不接受温度设置 - `claude-opus-4-7`、`claude-opus-4-8`、`claude-opus-5`、`claude-sonnet-5`、`claude-fable-5`、`o3`、`o4-mini`、`gpt-5` 和 `gpt-5.5`。该工具会为这些模型省略该字段，从而使调用仍能成功，它们将以提供商的默认值运行。
 - 运行相同的比较 3-5 次并查找模式
 - 跨多个提示比较，而不仅仅是一个
 - 使用 `--output json` 标志保存运行结果以进行系统分析
+
+这九个模型在调用时会省略温度字段，JSON 输出中的 `models_without_temperature` 会列出某次运行中受影响的模型。有三个后果值得了解。针对这些模型使用多个值的 `--temperatures` 扫描会发出相同的请求，而不是真正的扫描，此时该工具会打印警告。结果表格、CSV 和每条 JSON 结果记录中显示的温度是**请求的**值，而非实际应用的值。而 `--significance` 正是这可能改变结论而非仅仅改变标签的地方：将省略温度的模型与遵循温度的模型进行比较会产生方差差异，这是采样造成的假象，但 Welch 或 Mann-Whitney 会将其报告为模型质量差异。这种情况同样会有提示：任何将受影响模型与未受影响模型混合的显著性运行，都会打印一个 `Temperature not applied` 面板，列出以提供商默认温度运行的模型，并将 JSON 输出中的 `significance_temperature_mixed` 设为 `true`。既是多温度又存在混合的运行，两条消息会合并显示在同一个面板中。CSV 不含等效信号。
 
 ## 关于作者
 
