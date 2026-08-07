@@ -293,12 +293,12 @@ class TestScoreWithJudge:
         provider = _FakeJudgeProvider()
         await score_with_judge(
             judge_provider=provider,
-            judge_model="claude-opus-4-7",
+            judge_model="claude-sonnet-4-6",
             original_prompt="orig",
             response_to_eval="r",
             criteria=["x"],
         )
-        # Deterministic scoring: temperature MUST be 0.
+        # Deterministic scoring: temperature MUST be 0 for a model that accepts it.
         assert provider.calls[0]["temperature"] == 0.0
 
     async def test_parse_failure_captured(self) -> None:
