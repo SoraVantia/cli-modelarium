@@ -177,7 +177,7 @@ async def test_complete_records_ttft_and_latency(monkeypatch: pytest.MonkeyPatch
 
 
 async def test_system_prompt_passed_at_top_level(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Phase 3 critical contract: system goes top-level, NOT in messages array."""
+    """Critical contract: system goes top-level, NOT in messages array."""
     provider, messages = _make_provider(
         monkeypatch, text_chunks=["ok"], input_tokens=1, output_tokens=1
     )
@@ -218,7 +218,7 @@ async def test_temperature_passed_through(monkeypatch: pytest.MonkeyPatch) -> No
         monkeypatch, text_chunks=["x"], input_tokens=1, output_tokens=1
     )
 
-    await provider.complete("p", "claude-opus-4-7", 0.7)
+    await provider.complete("p", "claude-sonnet-4-6", 0.7)
 
     assert messages.last_kwargs["temperature"] == 0.7
 
