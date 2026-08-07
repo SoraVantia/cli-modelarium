@@ -161,7 +161,7 @@ class TestSafeInputPath:
         assert result == path.resolve()
 
     def test_max_size_bytes_is_parameter(self, tmp_path: Path) -> None:
-        """Confirms the size limit is per-caller; Phase 7 batch uses 10 MB."""
+        """Confirms the size limit is per-caller; batch input files use 10 MB."""
         path = tmp_path / "small.txt"
         path.write_bytes(b"x" * 500)
 
