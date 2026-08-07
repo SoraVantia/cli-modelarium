@@ -172,7 +172,7 @@ async def test_temperature_passed_through(
     stream = fake_openai_stream(text_chunks=["x"], input_tokens=1, output_tokens=1)
     provider, completions = _make_provider(monkeypatch, response=stream)
 
-    await provider.complete("p", "gpt-5.5", 0.7)
+    await provider.complete("p", "gpt-5.4", 0.7)
 
     assert completions.last_kwargs["temperature"] == 0.7
 
