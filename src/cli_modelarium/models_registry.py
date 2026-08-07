@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from cli_modelarium.exceptions import UnknownModelError
-from cli_modelarium.pricing import PRICING, is_local_model
+from cli_modelarium.exceptions import RetiredModelError, UnknownModelError
+from cli_modelarium.pricing import PRICING, RETIRED_MODELS, is_local_model
 
 # Group shortcuts let users write `--models all-premium` instead of listing
-# six model IDs. Groups are filtered at resolution time against the user's
-# configured providers, so requesting `all-premium` without an Anthropic key
-# just yields the providers the user actually has.
+# eight model IDs. Static groups expand unconditionally, so a group spanning N
+# providers needs all N keys and aborts on the first one missing. `all` and
+# `all-local` are the exception; `_resolve_dynamic_groups` resolves those.
 MODEL_GROUPS: dict[str, list[str]] = {
     "all-premium": [
         "gpt-5.5",
@@ -43,19 +43,10 @@ MODEL_GROUPS: dict[str, list[str]] = {
     "all-reasoning": [
         "o3",
         "o4-mini",
-        "deepseek-reasoner",
+        "deepseek-v4-pro",
         "magistral-medium-latest",
         "magistral-small-latest",
         "glm-5.2",
-    ],
-    "all-fast": [
-        "claude-haiku-4-5",
-        "gemini-3.5-flash",
-        "grok-4.20-0309-non-reasoning",
-        "deepseek-v4-flash",
-        "llama-3.3-70b-versatile",
-        "qwen3.6-flash",
-        "glm-5-turbo",
     ],
     "all-cheap": [
         "gpt-4o-mini",
@@ -66,9 +57,13 @@ MODEL_GROUPS: dict[str, list[str]] = {
         "qwen-flash",
         "glm-4.7-flashx",
     ],
+    # The gpt-oss models are served here by Groq, not OpenAI: the openai-provider
+    # entries were removed in 0.1.5 (not callable on chat-completions), and these
+    # Groq-served equivalents are the working route. Note this group now needs
+    # GROQ_API_KEY for those two slots, where it previously used OPENAI_API_KEY.
     "all-open-weight": [
-        "gpt-oss-120b",
-        "gpt-oss-20b",
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-safeguard-20b",
         "llama-3.3-70b-versatile",
         "meta-llama/llama-4-scout-17b-16e-instruct",
     ],
@@ -85,10 +80,21 @@ DYNAMIC_GROUPS = frozenset({"all-local", "all"})
 def get_provider_for_model(model: str) -> str:
     """Return the provider name for a model ID.
 
-    Raises UnknownModelError if the model is not in the registry.
+    Raises RetiredModelError if the provider retired the model, and
+    UnknownModelError if it is not in the registry at all.
+
+    This is the single chokepoint for model resolution - every call site
+    (streaming, batch, judge validation) routes through it before any request
+    is constructed, so the retirement check here covers every path that would
+    otherwise reach a provider. It errors; it never substitutes the
+    replacement.
     """
     if is_local_model(model):
         return "local"
+    retired = RETIRED_MODELS.get(model)
+    if retired is not None:
+        replacement, retired_on = retired
+        raise RetiredModelError(model, replacement, retired_on)
     pricing = PRICING.get(model)
     if pricing is None:
         raise UnknownModelError(
