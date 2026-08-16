@@ -71,6 +71,12 @@ Das ist alles. Sie sehen alle drei Modelle ihre Antworten parallel live streamen
 - Sehen Sie, welches Modell zuerst fertig ist, beobachten Sie Ausgaben in Echtzeit divergieren
 - Streams von allen 11 Anbietern (SSE im Hintergrund)
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-comparison-demo.gif" alt="Terminal-Demo von cli-modelarium: Drei Modelle streamen ihre Antworten auf denselben Prompt parallel, anschließend zeigt eine Vergleichstabelle Time-to-First-Token, Latenz, Token-Anzahl und Kosten pro Modell." width="718">
+</p>
+
+**Preishinweis:** Die Kostenangaben in Demos stammen aus einem einzelnen Lauf zum Aufnahmezeitpunkt. Preise ändern sich; überprüfen Sie sie beim Anbieter, bevor Sie sich auf eine Angabe verlassen.
+
 ### 📊 Mehrere Vergleichsmodi
 
 - **Einzelner Prompt vs. mehrere Modelle** - schnelle "welches ist am besten?"-Vergleiche
