@@ -14,6 +14,10 @@ Read this in other languages: [日本語](https://github.com/SoraVantia/cli-mode
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 ![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
+```bash
+pip install cli-modelarium
+```
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/SoraVantia/cli-modelarium/main/docs/assets/cli-modelarium-demo.png" alt="Cli Modelarium help output showing the banner and available commands" width="520">
 </p>
