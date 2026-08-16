@@ -71,6 +71,12 @@ C'est tout. Vous verrez les trois modèles diffuser leurs réponses en direct en
 - Voyez quel modèle termine en premier, observez les sorties diverger en temps réel
 - Streams depuis les 11 fournisseurs (SSE en interne)
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-comparison-demo.gif" alt="Démonstration de cli-modelarium dans le terminal : trois modèles diffusent leurs réponses au même prompt en parallèle, puis un tableau de comparaison affiche le Time-to-First-Token, la latence, les nombres de tokens et le coût par modèle." width="718">
+</p>
+
+**Note sur les tarifs :** les coûts affichés dans les démos proviennent d'une seule exécution au moment de l'enregistrement. Les tarifs changent ; vérifiez-les auprès du fournisseur avant de vous fier à un chiffre.
+
 ### 📊 Modes de comparaison multiples
 
 - **Un prompt vs. plusieurs modèles** - comparaisons rapides « lequel est le meilleur ? »
