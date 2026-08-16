@@ -7,11 +7,11 @@ Lesen Sie dies in anderen Sprachen: [English](README.md) | [日本語](README.ja
 
 Hinweis: Diese README ist aus Gründen der Zugänglichkeit übersetzt. Das Cli Modelarium CLI-Tool selbst gibt nur Englisch aus. Alle Befehle, Fehlermeldungen und Ausgaben bleiben unabhängig von Ihrer System-Locale auf Englisch.
 
-> Hinweis: Sieben Abschnitte gibt es bisher nur im englischen README — *Reproducibility analysis*, *Statistical significance testing*, *Bootstrap confidence intervals*, *Paired tests for same-prompt comparisons*, *McNemar's test for hallucination significance*, *Headless Linux servers* und *More examples*. Die Funktionen selbst sind vollständig verfügbar; nur ihre Dokumentation fehlt hier. Siehe [README.md](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.md).
+> Hinweis: Sieben Abschnitte gibt es bisher nur im englischen README — *Reproducibility analysis*, *Statistical significance testing*, *Bootstrap confidence intervals*, *Paired tests for same-prompt comparisons*, *McNemar's test for hallucination significance*, *Headless Linux servers* und *More examples*. Die Funktionen selbst sind vollständig verfügbar; nur ihre Dokumentation fehlt hier. Siehe [README.md](https://github.com/SoraVantia/cli-modelarium/blob/main/README.md).
 
-> Vergleichen Sie LLM-Ausgaben nebeneinander von Ihrem Terminal aus - 10 Cloud-Anbieter + lokale Modelle, mit parallelem Streaming, Batch-Evaluierung, LLM-as-Judge-Scoring, Halluzinationserkennung und CI/CD-fähigen Assertions.
+> Vergleichen Sie LLM-Ausgaben nebeneinander von Ihrem Terminal aus - 11 Cloud-Anbieter + lokale Modelle, mit parallelem Streaming, Batch-Evaluierung, LLM-as-Judge-Scoring, Halluzinationserkennung und CI/CD-fähigen Assertions.
 
-[![CI](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml)
+[![CI](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
 [![Downloads](https://img.shields.io/pepy/dt/cli-modelarium)](https://pepy.tech/project/cli-modelarium)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
@@ -27,6 +27,13 @@ Hinweis: Diese README ist aus Gründen der Zugänglichkeit übersetzt. Das Cli M
 **Cli Modelarium** ist ein ausgereiftes Kommandozeilen-Tool zum Vergleichen von LLM-Ausgaben über Anbieter, Modelle, System-Prompts und Temperaturen hinweg - mit eingebautem Live-Parallel-Streaming, Batch-Evaluierung, deterministischen Tests und Qualitäts-Scoring.
 
 Nützlich, um zu bewerten, welches Modell zu Ihrer spezifischen Aufgabe passt, Prompt-Regressionstests in CI/CD auszuführen, lokale Modelle mit Cloud-APIs zu vergleichen oder Evaluierungs-Datasets zu erstellen - alles aus einem einzigen Terminal-Befehl.
+
+## Systemanforderungen
+
+- Python 3.11 oder höher (Nutzer von Python 3.10: installieren Sie `cli-modelarium==0.1.1`)
+- ~350 MB Speicherplatz (scipy und numpy machen etwa zwei Drittel davon aus)
+- macOS (Apple Silicon und Intel), Windows 10+ (x64 und ARM), Linux (x64 und ARM)
+- Internetzugang für die Erstinstallation (Download des PyPI-Wheels)
 
 ## Schnellstart
 
@@ -46,9 +53,9 @@ Das ist alles. Sie sehen alle drei Modelle ihre Antworten parallel live streamen
 
 ## Funktionen
 
-### 🤖 Anbieter (10 Cloud + unbegrenzt lokal)
+### 🤖 Anbieter (11 Cloud + unbegrenzt lokal)
 
-- **Cloud-Anbieter:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM)
+- **Cloud-Anbieter:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM), NVIDIA (NIM)
 - **Lokale Modelle:** Ollama, LM Studio, vLLM, llama.cpp - jeder OpenAI-kompatible Server, der auf localhost läuft
 - Mischen Sie lokale und Cloud-Modelle im selben Vergleich
 - Wählen Sie pro Aufruf eine beliebige registrierte Modell-ID - nicht auf die integrierten Gruppen-Kürzel beschränkt
@@ -58,7 +65,7 @@ Das ist alles. Sie sehen alle drei Modelle ihre Antworten parallel live streamen
 - Live-Anzeige Token für Token über alle Modelle gleichzeitig
 - Time-to-First-Token (TTFT)-Tracking pro Modell
 - Sehen Sie, welches Modell zuerst fertig ist, beobachten Sie Ausgaben in Echtzeit divergieren
-- Streams von allen 10 Anbietern (SSE im Hintergrund)
+- Streams von allen 11 Anbietern (SSE im Hintergrund)
 
 ### 📊 Mehrere Vergleichsmodi
 
@@ -70,6 +77,7 @@ Das ist alles. Sie sehen alle drei Modelle ihre Antworten parallel live streamen
 
 ### 🧪 Evaluierungsfunktionen
 
+- **Statistische Reproduzierbarkeitsanalyse** - `--runs N` führt jede Konfiguration N-mal aus und meldet Mittelwert/Median/Standardabweichung/VK von Latenz und Tokens, Ausgabehäufigkeit, Modalausgabe und Ausgabediversität. Kombinieren Sie es mit `--check-hallucination`, um die Halluzinationsrate über mehrere Läufe zu messen.
 - **Deterministische Assertions** - 10 Assertion-Typen (`contains`, `regex`, `json_valid`, `json_schema`, `max_length_chars`, `latency_under`, `cost_under` und mehr) mit Pass/Fail-Ausgabe und CI-Exit-Codes
 - **LLM-as-a-Judge-Scoring** - Verwenden Sie ein LLM, um Ausgaben anderer nach Qualitätskriterien zu bewerten
 - **Judge-Panels** - Mehrere Judges mitteln Punktzahlen für eine weniger voreingenommene Bewertung
@@ -238,7 +246,7 @@ fi
 
 `--output-format json` ist erforderlich - die Standardausgabe enthält kein maschinenlesbares Fehlerfeld. Beachten Sie: Fehler, die *vor* dem ersten Modellaufruf auftreten (fehlender Schlüssel, unbekanntes Modell, fehlerhafte Batch-Datei), erzeugen überhaupt kein JSON; dort ist die Konsolenmeldung das einzige Signal.
 
-**Datenschutzhinweis:** Die JSON-Ausgabe enthält den vollständigen Prompt und die vollständige Modellantwort jedes Ergebnisses sowie eventuelle Provider-Fehlermeldungen. Behandeln Sie `results.json` als sensibel, bevor Sie es committen oder als öffentliches CI-Artefakt hochladen.
+**Datenschutzhinweis:** Jedes Ausgabeformat - JSON, CSV und Markdown - enthält den vollständigen Prompt und die vollständige Modellantwort jedes Ergebnisses sowie eventuelle Provider-Fehlermeldungen. Behandeln Sie jede Ausgabedatei als sensibel, bevor Sie sie committen oder als öffentliches CI-Artefakt hochladen.
 
 ## Konfiguration
 
@@ -301,6 +309,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | OpenRouter (8 registrierte IDs: Qwen, DeepSeek R1, Llama 3.3, gpt-oss, GLM) | ✅ | ✅ | ✅ |
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, usw.; ausgewählte Qwen-Modelle, International/Singapur) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air, usw.; OpenAI-kompatibel, Overseas-Endpunkt) | ✅ | ✅ | ✅ |
+| NVIDIA NIM (9 registrierte IDs: Nemotron, Gemma 4, Mistral Nemotron, MiniMax M3, Laguna, Llama 3.1) | ✅ | ✅ | Kein veröffentlichter Tarif |
 | **Lokal: Ollama** | ❌ | ✅ | Kostenlos |
 | **Lokal: LM Studio** | ❌ | ✅ | Kostenlos |
 | **Lokal: vLLM** | ❌ | ✅ | Kostenlos |
@@ -324,7 +333,7 @@ Anstatt Modell-IDs aufzulisten, akzeptiert `--models` ein Gruppenkürzel. Statis
 
 **Dynamische Gruppen** (zur Laufzeit aufgelöst):
 
-- `all` — jedes Cloud-Modell, für das Sie einen konfigurierten API-Schlüssel besitzen (ohne lokale Modelle und OpenRouter). Dies kann sich auf viele Modelle ausweiten, kombinieren Sie es daher mit `--max-cost`.
+- `all` — jedes Cloud-Modell, für das Sie einen konfigurierten API-Schlüssel besitzen (ohne lokale Modelle, OpenRouter und NVIDIA - die letzten beiden sind eine registrierte Teilmenge und nicht der vollständige Katalog des Anbieters, und NVIDIAs Kosten lassen sich nicht angeben). Dies kann sich auf viele Modelle ausweiten, kombinieren Sie es daher mit `--max-cost`.
 - `all-local` — jedes Modell, das von Ihrem laufenden lokalen Server (Ollama / LM Studio / vLLM / llama.cpp) gemeldet wird. Wenn kein Server erreichbar ist, erhalten Sie eine klare Meldung anstelle eines Fehlers.
 
 ```bash
@@ -349,6 +358,8 @@ Alle in Cli Modelarium integrierten Preise wurden am **29. Juli 2026** aus der o
 
 Die Preise sind der jeweilige Standard-/Listenpreis jedes Anbieters pro 1 Mio. Tokens (nicht Batch-, Priority-, Off-Peak- oder Aktionspreise); bei Modellen mit nach Eingabegröße gestaffelten Preisen wird die Einstiegs-/Kurzkontext-Stufe angezeigt, und der Cache-Preis entspricht dem Cache-Read-Tarif. Die Kosten für DashScope/Qwen spiegeln die Nicht-Thinking-Tarife wider (das Tool sendet `enable_thinking=false`).
 
+NVIDIA NIM ist die Ausnahme. NVIDIA veröffentlicht für seine gehosteten NIM-Endpunkte keinen Preis pro Token, daher werden die Kosten für NVIDIA-Modelle nicht erfasst: Die in der Kostenspalte angezeigte Null ist das Fehlen eines Tarifs, kein Preis von null. Da diese Kosten immer null sind, greift `--max-cost` bei einem NVIDIA-Modell nie, und eine `cost_under`-Assertion besteht immer - keines von beidem bietet Ihnen bei diesem Anbieter einen Ausgabenschutz. Der Zugang wird über Kontoguthaben abgerechnet statt pro Token; das zu beachtende Fehlerbild ist also der Verbrauch Ihres Guthabens, nicht eine unerwartete Rechnung. Sobald ein NVIDIA-Modell an einem Lauf beteiligt ist, wird ein Hinweis-Panel ausgegeben.
+
 Führen Sie `cli-modelarium pricing` (oder `pricing --all`) aus, um die aktuellen Tarife pro Modell zu erhalten.
 
 ### Rate-Limits
@@ -357,7 +368,7 @@ Die Rate-Limit-Handhabung und die Standard-Concurrency-Einstellungen pro Anbiete
 
 ### Modellverfügbarkeit
 
-Die von Cli Modelarium unterstützten Modelle spiegeln wider, was Anbieter am **29. Juli 2026** angeboten haben. Anbieter veröffentlichen regelmäßig neue Modelle, veralten ältere und passen Fähigkeiten an. Wenn ein Modell in der Registry nicht mehr funktioniert, führen Sie `cli-modelarium list-models` aus und überprüfen Sie die Dokumentation des Anbieters.
+Die von Cli Modelarium unterstützten Modelle spiegeln wider, was Anbieter am **15. August 2026** angeboten haben. Anbieter veröffentlichen regelmäßig neue Modelle, veralten ältere und passen Fähigkeiten an. Wenn ein Modell in der Registry nicht mehr funktioniert, führen Sie `cli-modelarium list-models` aus und überprüfen Sie die Dokumentation des Anbieters.
 
 ### Kein produktionsreifes Gateway
 
@@ -384,23 +395,21 @@ Das Halluzinationserkennungs-Preset ist ein nützliches Vergleichssignal zwische
 LLMs sind bei Temperatur > 0 nicht deterministisch - das erneute Ausführen desselben Prompts kann unterschiedliche Ausgaben erzeugen. Ein einzelner Vergleichsdurchlauf zeigt Ihnen EINE Stichprobe von jedem Modell, kein endgültiges Qualitätsurteil.
 
 Um zuverlässigere Schlussfolgerungen zu ziehen:
-- Verwenden Sie `--temperatures 0` für deterministischere Ausgaben. Einige Modelle akzeptieren überhaupt keine Temperatureinstellung - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5` und `gpt-5.5`. Das Tool lässt das Feld für diese Modelle weg, damit der Aufruf dennoch gelingt, und sie laufen stattdessen mit dem Standardwert ihres Anbieters.
-- Führen Sie denselben Vergleich 3-5 Mal aus und suchen Sie nach Mustern
+- Verwenden Sie `--runs 5` (oder höher), um jeden Vergleich automatisch N-mal auszuführen und statistische Zusammenfassungen zu sehen: mittlere/mediane Latenz, Variationskoeffizient, Modalausgabe und Ausgabediversität. Ein Variationskoeffizient unter 0,05 weist auf stabiles Modellverhalten über die Läufe hinweg hin.
+- Für die Analyse der Halluzinationskonsistenz kombinieren Sie `--runs` mit `--check-hallucination`, um zu sehen, wie oft das Modell über mehrere Läufe hinweg halluziniert (die Halluzinationsrate).
+- Verwenden Sie `--temperatures 0` für deterministischere Ausgaben. Einige Modelle akzeptieren überhaupt keine Temperatureinstellung - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra` und `gpt-5.6-luna`. Das Tool lässt das Feld für diese Modelle weg, damit der Aufruf dennoch gelingt, und sie laufen stattdessen mit dem Standardwert ihres Anbieters.
 - Vergleichen Sie über mehrere Prompts hinweg, nicht nur einen
-- Verwenden Sie das `--output json`-Flag, um Durchläufe für systematische Analyse zu speichern
+- Verwenden Sie das `--output json`-Flag, um Durchläufe für systematische Analyse zu speichern (bei `--runs > 1` enthält das JSON pro Zelle `stats_by_cell`-Aggregate)
 
-Diese neun Modelle werden ohne das Temperaturfeld aufgerufen, und `models_without_temperature` in der JSON-Ausgabe nennt die in einem bestimmten Lauf betroffenen Modelle. Drei Konsequenzen sollten Sie kennen. Ein `--temperatures`-Durchlauf mit mehreren Werten sendet bei diesen Modellen identische Anfragen statt einer echten Reihe, und das Tool gibt in diesem Fall eine Warnung aus. Die in der Ergebnistabelle, in der CSV-Datei und in jedem JSON-Ergebnisdatensatz angezeigte Temperatur ist der **angeforderte** Wert, nicht der angewendete. Und bei `--significance` kann dies eine Schlussfolgerung verändern statt nur eine Bezeichnung: Vergleicht man ein Modell, das die Temperatur weglässt, mit einem, das sie berücksichtigt, entsteht ein Varianzunterschied, der ein Stichprobenartefakt ist - Welch oder Mann-Whitney melden ihn jedoch, als wäre er ein Qualitätsunterschied zwischen den Modellen. Dieser Fall wird gemeldet: Jeder Signifikanzlauf, der ein betroffenes mit einem nicht betroffenen Modell mischt, gibt ein `Temperature not applied`-Panel aus, das die auf dem Provider-Standard laufenden Modelle benennt, und setzt `significance_temperature_mixed` in der JSON-Ausgabe auf `true`. Ein Lauf mit mehreren Temperaturen, der zugleich gemischt ist, erhält beide Meldungen in einem einzigen Panel. Die CSV-Ausgabe enthält kein entsprechendes Signal.
+Diese zwölf Modelle werden ohne das Temperaturfeld aufgerufen, und `models_without_temperature` in der JSON-Ausgabe nennt die in einem bestimmten Lauf betroffenen Modelle. Drei Konsequenzen sollten Sie kennen. Ein `--temperatures`-Durchlauf mit mehreren Werten sendet bei diesen Modellen identische Anfragen statt einer echten Reihe, und das Tool gibt in diesem Fall eine Warnung aus. Die in der Ergebnistabelle, in der CSV-Datei und in jedem JSON-Ergebnisdatensatz angezeigte Temperatur ist der **angeforderte** Wert, nicht der angewendete. Und bei `--significance` kann dies eine Schlussfolgerung verändern statt nur eine Bezeichnung: Vergleicht man ein Modell, das die Temperatur weglässt, mit einem, das sie berücksichtigt, entsteht ein Varianzunterschied, der ein Stichprobenartefakt ist - Welch oder Mann-Whitney melden ihn jedoch, als wäre er ein Qualitätsunterschied zwischen den Modellen. Dieser Fall wird gemeldet: Jeder Signifikanzlauf, der ein betroffenes mit einem nicht betroffenen Modell mischt, gibt ein `Temperature not applied`-Panel aus, das die auf dem Provider-Standard laufenden Modelle benennt, und setzt `significance_temperature_mixed` in der JSON-Ausgabe auf `true`. Ein Lauf mit mehreren Temperaturen, der zugleich gemischt ist, erhält beide Meldungen in einem einzigen Panel. Die CSV-Ausgabe enthält kein entsprechendes Signal.
 
-## Über den Autor
+## Über das Projekt
 
-Cli Modelarium wurde von **[Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)** entwickelt.
+Cli Modelarium ist ein Produkt von **SoraVantia GK**. Ursprünglich entwickelt von **Lavelle Hatcher Jr**, der es weiterhin betreut.
 
-### Verbinden
-
-- 💼 LinkedIn: [linkedin.com/in/lavellehatcherjr](https://linkedin.com/in/lavellehatcherjr)
-- 🐙 GitHub: [github.com/lavellehatcherjr](https://github.com/lavellehatcherjr)
-- 💬 Fragen zu diesem Projekt: [Issue öffnen](../../issues)
-- 📩 Kollaboration/Möglichkeiten: über LinkedIn kontaktieren
+- 📦 Repository: [github.com/SoraVantia/cli-modelarium](https://github.com/SoraVantia/cli-modelarium)
+- 💬 Fragen oder Fehler: [Issue öffnen](../../issues)
+- 🔧 Betreuer: [Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)
 
 ## Warum ich das gebaut habe
 
@@ -426,6 +435,6 @@ Siehe die [NOTICE](NOTICE)-Datei für Attribution-Anforderungen.
 
 ---
 
-Gebaut von [Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)
+Ein Produkt von SoraVantia GK, entwickelt und betreut von [Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)
 
 Lizenziert unter Apache 2.0. Issues, PRs und Gespräche willkommen.
