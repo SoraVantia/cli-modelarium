@@ -5,8 +5,9 @@ statistically rigorous LLM comparison across multiple providers.
 
 ## Quick Links
 
-- GitHub: https://github.com/lavellehatcherjr/cli-modelarium
-- Issues: https://github.com/lavellehatcherjr/cli-modelarium/issues/new
+- GitHub: https://github.com/SoraVantia/cli-modelarium
+- Issues: https://github.com/SoraVantia/cli-modelarium/issues/new
+- Owner: SoraVantia GK
 - Maintainer: Lavelle Hatcher Jr ([@lavellehatcherjr](https://github.com/lavellehatcherjr)) - Creator & Maintainer
 
 ## How to Contribute
@@ -32,7 +33,7 @@ patience, and thank you for helping make the project better.
 Clone the repository and install it with the development extras:
 
 ```bash
-git clone https://github.com/lavellehatcherjr/cli-modelarium.git
+git clone https://github.com/SoraVantia/cli-modelarium.git
 cd cli-modelarium
 python -m venv .venv
 source .venv/bin/activate
