@@ -71,6 +71,12 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - 어떤 모델이 먼저 완료되는지 확인하고 출력이 실시간으로 분기되는 것을 관찰
 - 11개 제공자 모두에서 스트림 (내부적으로 SSE)
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-comparison-demo.gif" alt="cli-modelarium 터미널 데모: 세 모델이 동일한 프롬프트에 대한 응답을 병렬로 라이브 스트리밍한 후, 비교 테이블에 모델별 Time-to-First-Token, 지연 시간, 토큰 수 및 비용이 표시됩니다." width="718">
+</p>
+
+**가격 관련 참고:** 데모에 표시된 비용은 녹화 시점의 단일 실행 결과입니다. 가격은 변경됩니다. 어떤 수치든 의존하기 전에 제공자를 통해 확인하십시오.
+
 ### 📊 다양한 비교 모드
 
 - **단일 프롬프트 vs. 여러 모델** - 빠른 "어떤 것이 가장 좋은가?" 비교
