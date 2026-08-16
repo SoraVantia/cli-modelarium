@@ -1,21 +1,21 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/cli-modelarium-wordmark-dark.svg">
-  <img alt="cli modelarium" src="https://raw.githubusercontent.com/lavellehatcherjr/cli-modelarium/main/docs/assets/cli-modelarium-wordmark-light.png" width="420">
+  <img alt="cli modelarium" src="https://raw.githubusercontent.com/SoraVantia/cli-modelarium/main/docs/assets/cli-modelarium-wordmark-light.png" width="420">
 </picture>
 
-Read this in other languages: [日本語](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.ja.md) | [Español](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.es.md) | [Français](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.fr.md) | [한국어](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.ko.md) | [中文](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.zh.md) | [Deutsch](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.de.md) | [Português](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.pt.md) | [Italiano](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.it.md)
+Read this in other languages: [日本語](https://github.com/SoraVantia/cli-modelarium/blob/main/README.ja.md) | [Español](https://github.com/SoraVantia/cli-modelarium/blob/main/README.es.md) | [Français](https://github.com/SoraVantia/cli-modelarium/blob/main/README.fr.md) | [한국어](https://github.com/SoraVantia/cli-modelarium/blob/main/README.ko.md) | [中文](https://github.com/SoraVantia/cli-modelarium/blob/main/README.zh.md) | [Deutsch](https://github.com/SoraVantia/cli-modelarium/blob/main/README.de.md) | [Português](https://github.com/SoraVantia/cli-modelarium/blob/main/README.pt.md) | [Italiano](https://github.com/SoraVantia/cli-modelarium/blob/main/README.it.md)
 
-> Compare LLM outputs side-by-side from your terminal - 10 cloud providers + local models, with parallel streaming, batch evaluation, LLM-as-judge scoring, hallucination detection, and CI/CD-ready assertions.
+> Compare LLM outputs side-by-side from your terminal - 11 cloud providers + local models, with parallel streaming, batch evaluation, LLM-as-judge scoring, hallucination detection, and CI/CD-ready assertions.
 
-[![CI](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml)
+[![CI](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
 [![Downloads](https://img.shields.io/pepy/dt/cli-modelarium)](https://pepy.tech/project/cli-modelarium)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](https://github.com/SoraVantia/cli-modelarium/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 ![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/lavellehatcherjr/cli-modelarium/main/docs/assets/cli-modelarium-demo.png" alt="Cli Modelarium help output showing the banner and available commands" width="520">
+  <img src="https://raw.githubusercontent.com/SoraVantia/cli-modelarium/main/docs/assets/cli-modelarium-demo.png" alt="Cli Modelarium help output showing the banner and available commands" width="520">
 </p>
 
 ## What it does
@@ -27,7 +27,7 @@ Useful for evaluating which model fits your specific task, running prompt regres
 ## System requirements
 
 - Python 3.11 or higher (Python 3.10 users: install `cli-modelarium==0.1.1`)
-- ~150 MB disk space (including scipy and numpy)
+- ~350 MB disk space (scipy and numpy are about two-thirds of it)
 - macOS (Apple Silicon and Intel), Windows 10+ (x64 and ARM), Linux (x64 and ARM)
 - Internet access for the first install (PyPI wheel download)
 
@@ -49,9 +49,9 @@ That's it. You'll see all three models stream their responses live in parallel, 
 
 ## Features
 
-### 🤖 Providers (10 cloud + unlimited local)
+### 🤖 Providers (11 cloud + unlimited local)
 
-- **Cloud providers:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM)
+- **Cloud providers:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM), NVIDIA (NIM)
 - **Local models:** Ollama, LM Studio, vLLM, llama.cpp - any OpenAI-compatible server running on localhost
 - Mix-and-match local and cloud models in the same comparison
 - Choose any registered model id per call - not limited to the built-in group shortcuts
@@ -61,7 +61,7 @@ That's it. You'll see all three models stream their responses live in parallel, 
 - Live token-by-token display across all models simultaneously
 - Time-to-First-Token (TTFT) tracking per model
 - See which model finishes first, watch outputs diverge in real time
-- Streams from all 10 providers (SSE under the hood)
+- Streams from all 11 providers (SSE under the hood)
 
 ### 📊 Multiple comparison modes
 
@@ -363,11 +363,11 @@ fi
 
 `--output-format json` is required - the default output carries no machine-readable error field. Note that failures which happen *before* any model is called (a missing key, an unknown model, a bad batch file) produce no JSON at all; the console message is the only signal in those cases.
 
-**Privacy note:** JSON output embeds the full prompt and the full model response for every result, alongside any provider error message. Treat `results.json` as sensitive before committing it or uploading it as a public CI artifact.
+**Privacy note:** Every output format - JSON, CSV and Markdown - embeds the full prompt and the full model response for every result, alongside any provider error message. Treat any output file as sensitive before committing it or uploading it as a public CI artifact.
 
 ### More examples
 
-The [`examples/`](https://github.com/lavellehatcherjr/cli-modelarium/tree/main/examples) folder contains focused demo scripts for
+The [`examples/`](https://github.com/SoraVantia/cli-modelarium/tree/main/examples) folder contains focused demo scripts for
 every major feature:
 
 - `basic_comparison.sh` - simple multi-model comparison
@@ -380,7 +380,7 @@ every major feature:
 - `ci_eval_suite.json` + `github_actions_workflow.yml` - CI/CD
   integration template
 
-See [`examples/README.md`](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/examples/README.md) for the full list.
+See [`examples/README.md`](https://github.com/SoraVantia/cli-modelarium/blob/main/examples/README.md) for the full list.
 
 ## Configuration
 
@@ -428,6 +428,8 @@ export DEEPSEEK_API_KEY="sk-..."
 export GROQ_API_KEY="gsk_..."
 export OPENROUTER_API_KEY="sk-or-..."
 export DASHSCOPE_API_KEY="sk-..."
+export ZAI_API_KEY="..."
+export NVIDIA_API_KEY="nvapi-..."
 ```
 
 `cli-modelarium` checks environment variables before the OS keyring, so this works out of the box. If you prefer a keyring on Linux, install `gnome-keyring` (GNOME), KWallet (KDE), or `keyrings.alt` (file-based fallback).
@@ -461,6 +463,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | OpenRouter (8 registered IDs: Qwen, DeepSeek R1, Llama 3.3, gpt-oss, GLM) | ✅ | ✅ | ✅ |
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, etc.; select Qwen models, International/Singapore) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air, etc.; OpenAI-compatible, overseas endpoint) | ✅ | ✅ | ✅ |
+| NVIDIA NIM (9 registered IDs: Nemotron, Gemma 4, Mistral Nemotron, MiniMax M3, Laguna, Llama 3.1) | ✅ | ✅ | No published rate |
 | **Local: Ollama** | ❌ | ✅ | Free |
 | **Local: LM Studio** | ❌ | ✅ | Free |
 | **Local: vLLM** | ❌ | ✅ | Free |
@@ -484,7 +487,7 @@ Instead of listing model IDs, `--models` accepts a group shortcut. Static groups
 
 **Dynamic groups** (resolved at runtime):
 
-- `all` — every cloud model you have a configured API key for (excludes local models and OpenRouter). This can fan out to many models, so pair it with `--max-cost`.
+- `all` — every cloud model you have a configured API key for (excludes local models, OpenRouter and NVIDIA - the latter two are a registered subset rather than the provider's full catalog, and NVIDIA's cost cannot be stated). This can fan out to many models, so pair it with `--max-cost`.
 - `all-local` — every model reported by your running local server (Ollama / LM Studio / vLLM / llama.cpp). If no server is reachable, you get a clear message instead of an error.
 
 ```bash
@@ -509,6 +512,8 @@ All pricing built into Cli Modelarium was verified from official provider docume
 
 Prices are each provider's standard/list public rate per 1M tokens (not batch, priority, off-peak, or promotional pricing); for input-size-tiered models the entry/short-context tier is shown, and cached pricing is the cache-read rate. DashScope/Qwen costs reflect non-thinking rates (the tool sends `enable_thinking=false`).
 
+NVIDIA NIM is the exception. NVIDIA publishes no per-token rate for its hosted NIM endpoints, so cost is not tracked for NVIDIA models: the zero shown in the cost column is the absence of a rate, not a price of zero. Because that cost is always zero, `--max-cost` will never trigger on an NVIDIA model and a `cost_under` assertion will always pass - neither gives you any spending protection on this provider. Access is metered in account credits rather than billed per token, so the failure mode to watch for is exhausting your credits, not an unexpected bill. A caveat panel is printed whenever an NVIDIA model is part of a run.
+
 Run `cli-modelarium pricing` (or `pricing --all`) for current per-model rates.
 
 ### Rate limits
@@ -517,7 +522,7 @@ Rate limit handling and the default per-provider concurrency settings are based 
 
 ### Model availability
 
-Models supported by Cli Modelarium reflect what providers offered on **July 29, 2026**. Providers regularly release new models, deprecate older ones, and adjust capabilities. If a model in the registry no longer works, run `cli-modelarium list-models` and check the provider's documentation.
+Models supported by Cli Modelarium reflect what providers offered on **August 15, 2026**. Providers regularly release new models, deprecate older ones, and adjust capabilities. If a model in the registry no longer works, run `cli-modelarium list-models` and check the provider's documentation.
 
 ### Not a production-grade gateway
 
@@ -546,22 +551,19 @@ LLMs are non-deterministic at temperature > 0 - re-running the same prompt may p
 To draw more reliable conclusions:
 - Use `--runs 5` (or higher) to automatically run each comparison N times and see statistical summaries: mean/median latency, coefficient of variation, mode output, and output diversity. Coefficient of variation below 0.05 indicates stable model behavior across runs.
 - For hallucination consistency analysis, combine `--runs` with `--check-hallucination` to see how often the model produces hallucinations across multiple runs (the hallucination rate).
-- Use `--temperatures 0` for more deterministic outputs. Some models do not accept a temperature setting at all - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5` and `gpt-5.5`. The tool omits the field for those so the call still succeeds, and they run at their provider's default instead.
+- Use `--temperatures 0` for more deterministic outputs. Some models do not accept a temperature setting at all - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra` and `gpt-5.6-luna`. The tool omits the field for those so the call still succeeds, and they run at their provider's default instead.
 - Compare across multiple prompts, not just one
 - Use the `--output json` flag to save runs for systematic analysis (with `--runs > 1` the JSON includes per-cell `stats_by_cell` aggregates)
 
-Those nine models are called without the temperature field, and `models_without_temperature` in the JSON output names the ones affected by any given run. Three consequences are worth knowing. A multi-value `--temperatures` sweep against one of them issues identical requests rather than a sweep, and the tool prints a warning when that happens. The temperature shown in the results table, the CSV and each JSON result record is the value you **requested**, not the value applied. And `--significance` is where this can change a conclusion rather than a label: comparing a model that omits temperature against one that honours it produces a variance difference that is a sampling artifact, which Welch or Mann-Whitney will report as though it were a model-quality difference. That case does warn: any significance run mixing an affected model with an unaffected one prints a `Temperature not applied` panel naming the models that ran at the provider default, and sets `significance_temperature_mixed` to `true` in the JSON output. A multi-temperature run that is also mixed gets both messages in a single panel. CSV carries no equivalent signal.
+Those twelve models are called without the temperature field, and `models_without_temperature` in the JSON output names the ones affected by any given run. Three consequences are worth knowing. A multi-value `--temperatures` sweep against one of them issues identical requests rather than a sweep, and the tool prints a warning when that happens. The temperature shown in the results table, the CSV and each JSON result record is the value you **requested**, not the value applied. And `--significance` is where this can change a conclusion rather than a label: comparing a model that omits temperature against one that honours it produces a variance difference that is a sampling artifact, which Welch or Mann-Whitney will report as though it were a model-quality difference. That case does warn: any significance run mixing an affected model with an unaffected one prints a `Temperature not applied` panel naming the models that ran at the provider default, and sets `significance_temperature_mixed` to `true` in the JSON output. A multi-temperature run that is also mixed gets both messages in a single panel. CSV carries no equivalent signal.
 
-## About the author
+## About
 
-Cli Modelarium was built by **[Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)**.
+Cli Modelarium is a product of **SoraVantia GK**. It was originally created by **Lavelle Hatcher Jr**, who continues to maintain it.
 
-### Connect
-
-- 💼 LinkedIn: [linkedin.com/in/lavellehatcherjr](https://linkedin.com/in/lavellehatcherjr)
-- 🐙 GitHub: [github.com/lavellehatcherjr](https://github.com/lavellehatcherjr)
-- 💬 Questions about this project: [open an issue](https://github.com/lavellehatcherjr/cli-modelarium/issues)
-- 📩 Collaboration/opportunities: reach out via LinkedIn
+- 📦 Repository: [github.com/SoraVantia/cli-modelarium](https://github.com/SoraVantia/cli-modelarium)
+- 💬 Questions or bugs: [open an issue](https://github.com/SoraVantia/cli-modelarium/issues)
+- 🔧 Maintainer: [Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)
 
 ## Why I built this
 
@@ -575,18 +577,18 @@ Built with a modular provider abstraction, parallel execution, transparent cost 
 
 ## Contributing
 
-Issues and PRs welcome. See [CONTRIBUTING.md](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/CONTRIBUTING.md) for guidelines.
+Issues and PRs welcome. See [CONTRIBUTING.md](https://github.com/SoraVantia/cli-modelarium/blob/main/CONTRIBUTING.md) for guidelines.
 
-For security issues, please see [SECURITY.md](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/SECURITY.md) - do not file public issues for security concerns.
+For security issues, please see [SECURITY.md](https://github.com/SoraVantia/cli-modelarium/blob/main/SECURITY.md) - do not file public issues for security concerns.
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/LICENSE).
+Licensed under the [Apache License, Version 2.0](https://github.com/SoraVantia/cli-modelarium/blob/main/LICENSE).
 
-See the [NOTICE](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/NOTICE) file for attribution requirements.
+See the [NOTICE](https://github.com/SoraVantia/cli-modelarium/blob/main/NOTICE) file for attribution requirements.
 
 ---
 
-Built by [Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)
+A product of SoraVantia GK, created and maintained by [Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)
 
 Licensed under Apache 2.0. Issues, PRs, and conversations welcome.
