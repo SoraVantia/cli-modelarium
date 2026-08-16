@@ -7,11 +7,11 @@
 
 注意: 此 README 是为了可访问性而翻译的。Cli Modelarium CLI 工具本身仅输出英文。无论系统区域设置如何，所有命令、错误消息和输出均保持英文。
 
-> 注意：以下七个章节仅存在于英文 README 中 — *Reproducibility analysis*、*Statistical significance testing*、*Bootstrap confidence intervals*、*Paired tests for same-prompt comparisons*、*McNemar's test for hallucination significance*、*Headless Linux servers*、*More examples*。功能本身均可正常使用，此处缺少的只是它们的说明。请参阅 [README.md](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.md)。
+> 注意：以下七个章节仅存在于英文 README 中 — *Reproducibility analysis*、*Statistical significance testing*、*Bootstrap confidence intervals*、*Paired tests for same-prompt comparisons*、*McNemar's test for hallucination significance*、*Headless Linux servers*、*More examples*。功能本身均可正常使用，此处缺少的只是它们的说明。请参阅 [README.md](https://github.com/SoraVantia/cli-modelarium/blob/main/README.md)。
 
-> 在终端中并排比较 LLM 输出 - 10 个云服务提供商 + 本地模型，支持并行流式传输、批量评估、LLM-as-judge 评分、幻觉检测和 CI/CD 就绪的断言。
+> 在终端中并排比较 LLM 输出 - 11 个云服务提供商 + 本地模型，支持并行流式传输、批量评估、LLM-as-judge 评分、幻觉检测和 CI/CD 就绪的断言。
 
-[![CI](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml)
+[![CI](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
 [![Downloads](https://img.shields.io/pepy/dt/cli-modelarium)](https://pepy.tech/project/cli-modelarium)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
@@ -27,6 +27,13 @@
 **Cli Modelarium** 是一款精心打造的命令行工具，用于跨提供商、模型、系统提示和温度参数比较 LLM 输出 - 内置实时并行流式传输、批量评估、确定性测试和质量评分。
 
 适用于评估哪个模型适合您的特定任务、在 CI/CD 中运行提示回归测试、将本地模型与云 API 进行比较，或构建评估数据集 - 一切都通过单个终端命令完成。
+
+## 系统要求
+
+- Python 3.11 或更高版本（Python 3.10 用户请安装 `cli-modelarium==0.1.1`）
+- 约 350 MB 磁盘空间（其中约三分之二为 scipy 和 numpy）
+- macOS（Apple Silicon 和 Intel）、Windows 10+（x64 和 ARM）、Linux（x64 和 ARM）
+- 首次安装需要联网（下载 PyPI wheel）
 
 ## 快速开始
 
@@ -46,9 +53,9 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ## 特性
 
-### 🤖 提供商（10 个云端 + 无限本地）
+### 🤖 提供商（11 个云端 + 无限本地）
 
-- **云服务提供商:** OpenAI、Anthropic、Google (Gemini)、xAI (Grok)、DeepSeek、Mistral、Groq、OpenRouter、Alibaba (DashScope)、Z.AI (GLM)
+- **云服务提供商:** OpenAI、Anthropic、Google (Gemini)、xAI (Grok)、DeepSeek、Mistral、Groq、OpenRouter、Alibaba (DashScope)、Z.AI (GLM)、NVIDIA (NIM)
 - **本地模型:** Ollama、LM Studio、vLLM、llama.cpp - 任何在 localhost 上运行的 OpenAI 兼容服务器
 - 在同一比较中混合使用本地和云模型
 - 每次调用可选择任何已注册的模型 ID - 不限于内置的分组快捷方式
@@ -58,7 +65,7 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - 同时跨所有模型逐令牌实时显示
 - 每个模型的 Time-to-First-Token (TTFT) 跟踪
 - 查看哪个模型首先完成，实时观察输出分歧
-- 来自所有 10 个提供商的流（底层使用 SSE）
+- 来自所有 11 个提供商的流（底层使用 SSE）
 
 ### 📊 多种比较模式
 
@@ -70,6 +77,7 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ### 🧪 评估功能
 
+- **统计可复现性分析** - `--runs N` 将每个配置运行 N 次，并报告延迟和令牌的平均值/中位数/标准差/变异系数、输出频率、众数输出和输出多样性。与 `--check-hallucination` 结合使用可测量多次运行中的幻觉率。
 - **确定性断言** - 10 种断言类型（`contains`、`regex`、`json_valid`、`json_schema`、`max_length_chars`、`latency_under`、`cost_under` 等），具有通过/失败输出和 CI 退出代码
 - **LLM-as-a-judge 评分** - 使用一个 LLM 根据质量标准对其他 LLM 的输出进行评分
 - **评判面板** - 多个评判平均得分以减少偏见的评估
@@ -238,7 +246,7 @@ fi
 
 `--output-format json` 是必需的：默认输出不含任何机器可读的错误字段。请注意，在调用任何模型*之前*发生的失败（缺少密钥、未知模型、批处理文件有误）根本不会生成 JSON；此时控制台消息是唯一的信号。
 
-**隐私提示：** JSON 输出会嵌入每条结果的完整提示词和完整模型响应，以及提供商的任何错误消息。在提交 `results.json` 或将其作为公开 CI 产物上传之前，请将其视为敏感信息。
+**隐私提示：** JSON、CSV 和 Markdown 每种输出格式都会嵌入每条结果的完整提示词和完整模型响应，以及提供商的任何错误消息。在提交输出文件或将其作为公开 CI 产物上传之前，请将其视为敏感信息。
 
 ## 配置
 
@@ -301,6 +309,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | OpenRouter (已注册的 8 个 ID：Qwen、DeepSeek R1、Llama 3.3、gpt-oss、GLM) | ✅ | ✅ | ✅ |
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder 等；精选 Qwen 模型，国际/新加坡) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2、GLM-4.7、GLM-4.5 Air 等；OpenAI 兼容，海外端点) | ✅ | ✅ | ✅ |
+| NVIDIA NIM (已注册的 9 个 ID：Nemotron、Gemma 4、Mistral Nemotron、MiniMax M3、Laguna、Llama 3.1) | ✅ | ✅ | 无公开费率 |
 | **本地: Ollama** | ❌ | ✅ | 免费 |
 | **本地: LM Studio** | ❌ | ✅ | 免费 |
 | **本地: vLLM** | ❌ | ✅ | 免费 |
@@ -324,7 +333,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 
 **动态组**（在运行时解析）：
 
-- `all` — 你已配置 API 密钥的每一个云端模型（不包括本地模型和 OpenRouter）。这可能会扩展到许多模型，因此请搭配 `--max-cost` 使用。
+- `all` — 你已配置 API 密钥的每一个云端模型（不包括本地模型、OpenRouter 和 NVIDIA：后两者是已注册的子集而非提供商的完整目录，且 NVIDIA 的成本无法给出）。这可能会扩展到许多模型，因此请搭配 `--max-cost` 使用。
 - `all-local` — 你正在运行的本地服务器（Ollama / LM Studio / vLLM / llama.cpp）所报告的每一个模型。如果没有可访问的服务器，你将收到清晰的提示信息，而不是错误。
 
 ```bash
@@ -349,6 +358,8 @@ Cli Modelarium 内置的所有定价均于 **2026 年 7 月 29 日** 从官方�
 
 价格为每个提供商每 100 万令牌的标准/标价公开费率（非批量、优先、非高峰或促销定价）；对于按输入大小分层的模型，显示入门/短上下文层级，缓存定价为缓存读取费率。DashScope/Qwen 成本反映非思考费率（该工具发送 `enable_thinking=false`）。
 
+NVIDIA NIM 是例外。NVIDIA 未公布其托管 NIM 端点的每令牌费率，因此不会跟踪 NVIDIA 模型的成本：成本列中显示的零表示没有费率，而不是价格为零。由于该成本始终为零，`--max-cost` 在 NVIDIA 模型上永远不会触发，`cost_under` 断言也总是通过——两者在该提供商上都无法为您提供任何支出保护。访问按账户额度计量，而非按令牌计费，因此需要留意的是额度耗尽，而不是意外账单。只要运行中包含 NVIDIA 模型，就会输出一个提示面板。
+
 运行 `cli-modelarium pricing`（或 `pricing --all`）以获取当前的每个模型费率。
 
 ### 速率限制
@@ -357,7 +368,7 @@ Cli Modelarium 内置的所有定价均于 **2026 年 7 月 29 日** 从官方�
 
 ### 模型可用性
 
-Cli Modelarium 支持的模型反映了 **2026 年 7 月 29 日** 提供商提供的内容。提供商会定期发布新模型、弃用旧模型并调整能力。如果注册表中的模型不再工作，请运行 `cli-modelarium list-models` 并查看提供商的文档。
+Cli Modelarium 支持的模型反映了 **2026 年 8 月 15 日** 提供商提供的内容。提供商会定期发布新模型、弃用旧模型并调整能力。如果注册表中的模型不再工作，请运行 `cli-modelarium list-models` 并查看提供商的文档。
 
 ### 不是生产级网关
 
@@ -384,23 +395,21 @@ Cli Modelarium 包含可选的 LLM-as-a-judge 评分（通过 `--judge` 标志�
 LLM 在温度 > 0 时是非确定性的 - 重新运行相同的提示可能产生不同的输出。单次比较运行向您显示每个模型的一个样本，而不是最终的质量判决。
 
 要得出更可靠的结论:
-- 使用 `--temperatures 0` 获得更确定性的输出。部分模型完全不接受温度设置 - `claude-opus-4-7`、`claude-opus-4-8`、`claude-opus-5`、`claude-sonnet-5`、`claude-fable-5`、`o3`、`o4-mini`、`gpt-5` 和 `gpt-5.5`。该工具会为这些模型省略该字段，从而使调用仍能成功，它们将以提供商的默认值运行。
-- 运行相同的比较 3-5 次并查找模式
+- 使用 `--runs 5`（或更高）自动将每个比较运行 N 次并查看统计摘要：平均/中位数延迟、变异系数、众数输出和输出多样性。变异系数低于 0.05 表示模型在多次运行中行为稳定。
+- 若要分析幻觉一致性，请将 `--runs` 与 `--check-hallucination` 结合使用，以查看模型在多次运行中产生幻觉的频率（幻觉率）。
+- 使用 `--temperatures 0` 获得更确定性的输出。部分模型完全不接受温度设置 - `claude-opus-4-7`、`claude-opus-4-8`、`claude-opus-5`、`claude-sonnet-5`、`claude-fable-5`、`o3`、`o4-mini`、`gpt-5`、`gpt-5.5`、`gpt-5.6-sol`、`gpt-5.6-terra` 和 `gpt-5.6-luna`。该工具会为这些模型省略该字段，从而使调用仍能成功，它们将以提供商的默认值运行。
 - 跨多个提示比较，而不仅仅是一个
-- 使用 `--output json` 标志保存运行结果以进行系统分析
+- 使用 `--output json` 标志保存运行结果以进行系统分析（当 `--runs > 1` 时，JSON 包含按单元格的 `stats_by_cell` 聚合）
 
-这九个模型在调用时会省略温度字段，JSON 输出中的 `models_without_temperature` 会列出某次运行中受影响的模型。有三个后果值得了解。针对这些模型使用多个值的 `--temperatures` 扫描会发出相同的请求，而不是真正的扫描，此时该工具会打印警告。结果表格、CSV 和每条 JSON 结果记录中显示的温度是**请求的**值，而非实际应用的值。而 `--significance` 正是这可能改变结论而非仅仅改变标签的地方：将省略温度的模型与遵循温度的模型进行比较会产生方差差异，这是采样造成的假象，但 Welch 或 Mann-Whitney 会将其报告为模型质量差异。这种情况同样会有提示：任何将受影响模型与未受影响模型混合的显著性运行，都会打印一个 `Temperature not applied` 面板，列出以提供商默认温度运行的模型，并将 JSON 输出中的 `significance_temperature_mixed` 设为 `true`。既是多温度又存在混合的运行，两条消息会合并显示在同一个面板中。CSV 不含等效信号。
+这十二个模型在调用时会省略温度字段，JSON 输出中的 `models_without_temperature` 会列出某次运行中受影响的模型。有三个后果值得了解。针对这些模型使用多个值的 `--temperatures` 扫描会发出相同的请求，而不是真正的扫描，此时该工具会打印警告。结果表格、CSV 和每条 JSON 结果记录中显示的温度是**请求的**值，而非实际应用的值。而 `--significance` 正是这可能改变结论而非仅仅改变标签的地方：将省略温度的模型与遵循温度的模型进行比较会产生方差差异，这是采样造成的假象，但 Welch 或 Mann-Whitney 会将其报告为模型质量差异。这种情况同样会有提示：任何将受影响模型与未受影响模型混合的显著性运行，都会打印一个 `Temperature not applied` 面板，列出以提供商默认温度运行的模型，并将 JSON 输出中的 `significance_temperature_mixed` 设为 `true`。既是多温度又存在混合的运行，两条消息会合并显示在同一个面板中。CSV 不含等效信号。
 
-## 关于作者
+## 关于本项目
 
-Cli Modelarium 由 **[Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)** 构建。
+Cli Modelarium 是 **SoraVantia GK** 的产品，由 **Lavelle Hatcher Jr** 创建并持续维护。
 
-### 联系
-
-- 💼 LinkedIn: [linkedin.com/in/lavellehatcherjr](https://linkedin.com/in/lavellehatcherjr)
-- 🐙 GitHub: [github.com/lavellehatcherjr](https://github.com/lavellehatcherjr)
-- 💬 关于此项目的问题: [打开 issue](../../issues)
-- 📩 合作/机会: 通过 LinkedIn 联系
+- 📦 仓库: [github.com/SoraVantia/cli-modelarium](https://github.com/SoraVantia/cli-modelarium)
+- 💬 问题或缺陷: [打开 issue](../../issues)
+- 🔧 维护者: [Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)
 
 ## 为什么构建它
 
@@ -426,6 +435,6 @@ Cli Modelarium 是一个专注的小型 CLI 工具，专门做好一件事: 带�
 
 ---
 
-由 [Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr) 构建
+SoraVantia GK 出品，由 [Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr) 创建并维护
 
 依据 Apache 2.0 授权。欢迎 issues、PR 和对话。
