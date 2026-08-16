@@ -314,6 +314,33 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
     "glm-4.5-airx": {"input": 1.10, "output": 4.50, "cached_input": 0.22, "provider": "zai"},
     "glm-4.5-flash": {"input": 0.00, "output": 0.00, "cached_input": 0.00, "provider": "zai"},
     "glm-4-32b-0414-128k": {"input": 0.10, "output": 0.10, "provider": "zai"},
+    # ===== NVIDIA NIM =====
+    # Verified 2026-08-15 by live call: each is reachable on chat-completions,
+    # answers in `content` rather than `reasoning_content`, accepts a temperature,
+    # and streams with usage.
+    #
+    # THESE ZEROS ARE NOT A PRICE. NVIDIA publishes no per-token rate for hosted
+    # NIM anywhere - not in the API, the featured-models feed or the catalog -
+    # so 0.0 is what this schema forces, not what the models cost. Access is
+    # credit-metered rather than per-token, so a user exhausts credits instead of
+    # receiving a bill. Do NOT read these as equivalent to the genuinely-free
+    # rows above (the OpenRouter `:free` entries and the two GLM flash models),
+    # which are published at zero. `--max-cost` and the `cost_under` assertion
+    # therefore provide no protection on this provider; a caveat panel says so at
+    # the point of use. No `cached_input` - there is no cache-read rate either.
+    "google/gemma-4-31b-it": {"input": 0.0, "output": 0.0, "provider": "nvidia"},
+    "google/diffusiongemma-26b-a4b-it": {"input": 0.0, "output": 0.0, "provider": "nvidia"},
+    "nvidia/nemotron-3-ultra-550b-a55b": {"input": 0.0, "output": 0.0, "provider": "nvidia"},
+    "nvidia/llama-3.3-nemotron-super-49b-v1": {
+        "input": 0.0,
+        "output": 0.0,
+        "provider": "nvidia",
+    },
+    "nvidia/nemotron-mini-4b-instruct": {"input": 0.0, "output": 0.0, "provider": "nvidia"},
+    "mistralai/mistral-nemotron": {"input": 0.0, "output": 0.0, "provider": "nvidia"},
+    "minimaxai/minimax-m3": {"input": 0.0, "output": 0.0, "provider": "nvidia"},
+    "poolside/laguna-xs-2.1": {"input": 0.0, "output": 0.0, "provider": "nvidia"},
+    "meta/llama-3.1-8b-instruct": {"input": 0.0, "output": 0.0, "provider": "nvidia"},
     # ===== Local =====
     # Wildcard entry. Any model with `local/` prefix resolves here and costs $0.
     "local/*": {"input": 0.0, "output": 0.0, "provider": "local", "is_local": True},
