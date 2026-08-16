@@ -48,7 +48,7 @@ dependencies = [
     "anthropic>=0.104,<0.200",
     "google-genai~=2.6",
     # The 2.4.7 floor excludes 2.4.6, withdrawn from PyPI after a malicious release; do not lower it.
-    "mistralai>=2.4.7,<2.10.0",
+    "mistralai>=2.9.2,<2.10.0",
     "httpx~=0.28",
     "click~=8.4",
     "rich~=15.0",
