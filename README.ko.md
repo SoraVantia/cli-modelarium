@@ -7,11 +7,11 @@
 
 참고: 이 README는 접근성을 위해 번역되었습니다. Cli Modelarium CLI 도구 자체는 영어로만 출력됩니다. 모든 명령, 오류 메시지 및 출력은 시스템 로케일에 관계없이 영어로 유지됩니다.
 
-> 참고: 다음 일곱 개 섹션은 영어 README 에만 있습니다 — *Reproducibility analysis*, *Statistical significance testing*, *Bootstrap confidence intervals*, *Paired tests for same-prompt comparisons*, *McNemar's test for hallucination significance*, *Headless Linux servers*, *More examples*. 기능 자체는 모두 사용할 수 있으며, 여기에 없는 것은 해당 설명뿐입니다. [README.md](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.md) 를 참조하십시오.
+> 참고: 다음 일곱 개 섹션은 영어 README 에만 있습니다 — *Reproducibility analysis*, *Statistical significance testing*, *Bootstrap confidence intervals*, *Paired tests for same-prompt comparisons*, *McNemar's test for hallucination significance*, *Headless Linux servers*, *More examples*. 기능 자체는 모두 사용할 수 있으며, 여기에 없는 것은 해당 설명뿐입니다. [README.md](https://github.com/SoraVantia/cli-modelarium/blob/main/README.md) 를 참조하십시오.
 
-> 터미널에서 LLM 출력을 나란히 비교 - 10개 클라우드 제공자 + 로컬 모델, 병렬 스트리밍, 배치 평가, LLM-as-judge 스코어링, 환각 감지 및 CI/CD 지원 어설션 포함.
+> 터미널에서 LLM 출력을 나란히 비교 - 11개 클라우드 제공자 + 로컬 모델, 병렬 스트리밍, 배치 평가, LLM-as-judge 스코어링, 환각 감지 및 CI/CD 지원 어설션 포함.
 
-[![CI](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml)
+[![CI](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
 [![Downloads](https://img.shields.io/pepy/dt/cli-modelarium)](https://pepy.tech/project/cli-modelarium)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
@@ -27,6 +27,13 @@
 **Cli Modelarium**은 제공자, 모델, 시스템 프롬프트 및 온도 전반에 걸쳐 LLM 출력을 비교하기 위한 세련된 명령줄 도구입니다 - 라이브 병렬 스트리밍, 배치 평가, 결정론적 테스트 및 품질 스코어링이 내장되어 있습니다.
 
 특정 작업에 적합한 모델을 평가하거나, CI/CD에서 프롬프트 회귀 테스트를 실행하거나, 로컬 모델을 클라우드 API와 비교하거나, 평가 데이터셋을 구축하는 데 유용합니다 - 모두 단일 터미널 명령으로 가능합니다.
+
+## 시스템 요구 사항
+
+- Python 3.11 이상 (Python 3.10 사용자는 `cli-modelarium==0.1.1`을 설치하십시오)
+- 약 350 MB의 디스크 공간 (그중 약 3분의 2가 scipy와 numpy)
+- macOS (Apple Silicon 및 Intel), Windows 10+ (x64 및 ARM), Linux (x64 및 ARM)
+- 최초 설치 시 인터넷 연결 (PyPI 휠 다운로드)
 
 ## 빠른 시작
 
@@ -46,9 +53,9 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ## 기능
 
-### 🤖 제공자 (10개 클라우드 + 무제한 로컬)
+### 🤖 제공자 (11개 클라우드 + 무제한 로컬)
 
-- **클라우드 제공자:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM)
+- **클라우드 제공자:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM), NVIDIA (NIM)
 - **로컬 모델:** Ollama, LM Studio, vLLM, llama.cpp - localhost에서 실행되는 모든 OpenAI 호환 서버
 - 동일한 비교에서 로컬 및 클라우드 모델 혼합 가능
 - 호출마다 등록된 모든 모델 ID 선택 가능 - 내장 그룹 단축키에 국한되지 않음
@@ -58,7 +65,7 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - 모든 모델에서 동시에 토큰별 라이브 표시
 - 모델당 Time-to-First-Token (TTFT) 추적
 - 어떤 모델이 먼저 완료되는지 확인하고 출력이 실시간으로 분기되는 것을 관찰
-- 10개 제공자 모두에서 스트림 (내부적으로 SSE)
+- 11개 제공자 모두에서 스트림 (내부적으로 SSE)
 
 ### 📊 다양한 비교 모드
 
@@ -70,6 +77,7 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ### 🧪 평가 기능
 
+- **통계적 재현성 분석** - `--runs N`은 각 구성을 N회 실행하고 지연 시간과 토큰의 평균/중앙값/표준편차/변동계수, 출력 빈도, 최빈 출력, 출력 다양성을 보고합니다. `--check-hallucination`과 함께 사용하면 여러 실행에 걸친 환각 발생률을 측정할 수 있습니다.
 - **결정론적 어설션** - 10가지 어설션 유형 (`contains`, `regex`, `json_valid`, `json_schema`, `max_length_chars`, `latency_under`, `cost_under` 등), 통과/실패 출력 및 CI 종료 코드 포함
 - **LLM-as-a-judge 스코어링** - 한 LLM을 사용하여 품질 기준에 따라 다른 LLM의 출력 점수 매김
 - **저지 패널** - 여러 저지가 점수를 평균화하여 덜 편향된 평가 제공
@@ -238,7 +246,7 @@ fi
 
 `--output-format json` 이 필요합니다. 기본 출력에는 기계가 읽을 수 있는 오류 필드가 없습니다. 모델을 호출하기 *전에* 발생한 실패(키 누락, 알 수 없는 모델, 잘못된 배치 파일)에서는 JSON이 전혀 생성되지 않으므로, 그런 경우에는 콘솔 메시지가 유일한 신호입니다.
 
-**개인정보 관련 참고:** JSON 출력에는 각 결과의 전체 프롬프트와 전체 모델 응답, 그리고 제공업체의 오류 메시지가 포함됩니다. `results.json` 을 커밋하거나 공개 CI 아티팩트로 업로드하기 전에 민감한 정보로 취급하십시오.
+**개인정보 관련 참고:** JSON, CSV, Markdown 등 모든 출력 형식에는 각 결과의 전체 프롬프트와 전체 모델 응답, 그리고 제공업체의 오류 메시지가 포함됩니다. 출력 파일을 커밋하거나 공개 CI 아티팩트로 업로드하기 전에 민감한 정보로 취급하십시오.
 
 ## 구성
 
@@ -301,6 +309,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | OpenRouter (등록된 8개 ID: Qwen, DeepSeek R1, Llama 3.3, gpt-oss, GLM) | ✅ | ✅ | ✅ |
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder 등; 일부 Qwen 모델, International/Singapore) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air 등; OpenAI 호환, 해외 엔드포인트) | ✅ | ✅ | ✅ |
+| NVIDIA NIM (등록된 9개 ID: Nemotron, Gemma 4, Mistral Nemotron, MiniMax M3, Laguna, Llama 3.1) | ✅ | ✅ | 공개된 요금 없음 |
 | **로컬: Ollama** | ❌ | ✅ | 무료 |
 | **로컬: LM Studio** | ❌ | ✅ | 무료 |
 | **로컬: vLLM** | ❌ | ✅ | 무료 |
@@ -324,7 +333,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 
 **동적 그룹** (런타임에 확인됨):
 
-- `all` — 구성된 API 키를 보유한 모든 클라우드 모델(로컬 모델 및 OpenRouter 제외). 많은 모델로 확장될 수 있으므로 `--max-cost`와 함께 사용하십시오.
+- `all` — 구성된 API 키를 보유한 모든 클라우드 모델(로컬 모델, OpenRouter, NVIDIA 제외. 뒤의 둘은 제공자의 전체 카탈로그가 아니라 등록된 일부이며, NVIDIA는 비용을 제시할 수 없습니다). 많은 모델로 확장될 수 있으므로 `--max-cost`와 함께 사용하십시오.
 - `all-local` — 실행 중인 로컬 서버(Ollama / LM Studio / vLLM / llama.cpp)가 보고하는 모든 모델. 도달 가능한 서버가 없으면 오류 대신 명확한 메시지가 표시됩니다.
 
 ```bash
@@ -349,6 +358,8 @@ Cli Modelarium에 포함된 모든 가격은 **2026년 7월 29일**에 공식 �
 
 가격은 각 제공자의 1M 토큰당 표준/정가 공개 요금입니다(배치, 우선순위, 오프피크 또는 프로모션 가격이 아님). 입력 크기별로 티어가 나뉘는 모델의 경우 진입/짧은 컨텍스트 티어가 표시되며, 캐시 가격은 캐시 읽기 요금입니다. DashScope/Qwen 비용은 비사고(non-thinking) 요금을 반영합니다(도구가 `enable_thinking=false`를 전송함).
 
+NVIDIA NIM은 예외입니다. NVIDIA는 호스팅되는 NIM 엔드포인트에 대해 토큰당 요금을 공개하지 않으므로 NVIDIA 모델의 비용은 추적되지 않습니다. 비용 열에 표시되는 0은 요금이 없다는 뜻이며 가격이 0이라는 의미가 아닙니다. 이 비용은 항상 0이기 때문에 NVIDIA 모델에서는 `--max-cost`가 절대 작동하지 않고 `cost_under` 어설션은 항상 통과합니다. 두 가지 모두 이 제공자에서는 지출을 막아 주지 못합니다. 접근은 토큰당 청구가 아니라 계정 크레딧으로 측정되므로, 주의해야 할 것은 예상치 못한 청구서가 아니라 크레딧 소진입니다. NVIDIA 모델이 실행에 포함되면 이를 알리는 주의 패널이 출력됩니다.
+
 모델별 현재 요금을 확인하려면 `cli-modelarium pricing`(또는 `pricing --all`)을 실행하십시오.
 
 ### 속도 제한
@@ -357,7 +368,7 @@ Cli Modelarium에 포함된 모든 가격은 **2026년 7월 29일**에 공식 �
 
 ### 모델 가용성
 
-Cli Modelarium에서 지원하는 모델은 **2026년 7월 29일**에 제공자가 제공한 것을 반영합니다. 제공자는 정기적으로 새 모델을 출시하고 오래된 모델을 폐기하며 기능을 조정합니다. 레지스트리의 모델이 더 이상 작동하지 않으면 `cli-modelarium list-models`를 실행하고 제공자의 문서를 확인하십시오.
+Cli Modelarium에서 지원하는 모델은 **2026년 8월 15일**에 제공자가 제공한 것을 반영합니다. 제공자는 정기적으로 새 모델을 출시하고 오래된 모델을 폐기하며 기능을 조정합니다. 레지스트리의 모델이 더 이상 작동하지 않으면 `cli-modelarium list-models`를 실행하고 제공자의 문서를 확인하십시오.
 
 ### 프로덕션 등급 게이트웨이가 아님
 
@@ -384,23 +395,21 @@ Cli Modelarium에는 `--judge` 플래그로 활성화되는 선택적 LLM-as-a-j
 LLM은 온도 > 0에서 비결정론적입니다 - 동일한 프롬프트를 다시 실행하면 다른 출력이 생성될 수 있습니다. 단일 비교 실행은 각 모델에서 하나의 샘플을 보여줄 뿐이지 결정적인 품질 판정이 아닙니다.
 
 더 신뢰할 수 있는 결론을 도출하려면:
-- 더 결정론적인 출력을 위해 `--temperatures 0` 사용. 일부 모델은 온도 설정을 전혀 받아들이지 않습니다 - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`입니다. 도구는 이러한 모델에 대해 해당 필드를 생략하여 호출이 성공하도록 하며, 이 모델들은 제공자의 기본값으로 실행됩니다.
-- 동일한 비교를 3-5회 실행하고 패턴을 찾기
+- `--runs 5`(또는 그 이상)를 사용하면 각 비교를 자동으로 N회 실행하고 통계 요약(평균/중앙값 지연 시간, 변동계수, 최빈 출력, 출력 다양성)을 확인할 수 있습니다. 변동계수가 0.05 미만이면 실행 간 모델 동작이 안정적임을 의미합니다.
+- 환각 일관성 분석을 위해 `--runs`와 `--check-hallucination`을 함께 사용하면 여러 실행에서 모델이 얼마나 자주 환각을 일으키는지(환각 발생률)를 확인할 수 있습니다.
+- 더 결정론적인 출력을 위해 `--temperatures 0` 사용. 일부 모델은 온도 설정을 전혀 받아들이지 않습니다 - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`입니다. 도구는 이러한 모델에 대해 해당 필드를 생략하여 호출이 성공하도록 하며, 이 모델들은 제공자의 기본값으로 실행됩니다.
 - 하나가 아닌 여러 프롬프트에 걸쳐 비교
-- 체계적 분석을 위해 실행 결과를 저장하려면 `--output json` 플래그 사용
+- 체계적 분석을 위해 실행 결과를 저장하려면 `--output json` 플래그 사용(`--runs > 1`인 경우 JSON에 셀별 `stats_by_cell` 집계가 포함됩니다)
 
-이 아홉 개 모델은 온도 필드 없이 호출되며, JSON 출력의 `models_without_temperature`가 해당 실행에서 영향을 받은 모델을 나열합니다. 알아두어야 할 결과가 세 가지 있습니다. 여러 값을 지정한 `--temperatures` 스윕은 이러한 모델에 대해 실제 스윕이 아니라 동일한 요청을 보내며, 이 경우 도구가 경고를 출력합니다. 결과 테이블, CSV, 각 JSON 결과 레코드에 표시되는 온도는 실제로 적용된 값이 아니라 **요청된** 값입니다. 그리고 `--significance`는 이것이 라벨이 아니라 결론 자체를 바꿀 수 있는 지점입니다. 온도를 생략하는 모델과 온도를 반영하는 모델을 비교하면 표본 추출로 인한 분산 차이가 생기는데, Welch나 Mann-Whitney는 이를 모델 품질 차이인 것처럼 보고합니다. 이 경우에도 경고가 표시됩니다. 영향을 받는 모델과 받지 않는 모델을 섞은 유의성 검정은 제공업체 기본 온도로 실행된 모델의 이름을 명시한 `Temperature not applied` 패널을 출력하고, JSON 출력의 `significance_temperature_mixed`를 `true`로 설정합니다. 여러 온도를 사용하면서 동시에 혼합된 실행에서는 두 메시지가 하나의 패널에 함께 표시됩니다. CSV에는 이에 상응하는 신호가 없습니다.
+이 열두 개 모델은 온도 필드 없이 호출되며, JSON 출력의 `models_without_temperature`가 해당 실행에서 영향을 받은 모델을 나열합니다. 알아두어야 할 결과가 세 가지 있습니다. 여러 값을 지정한 `--temperatures` 스윕은 이러한 모델에 대해 실제 스윕이 아니라 동일한 요청을 보내며, 이 경우 도구가 경고를 출력합니다. 결과 테이블, CSV, 각 JSON 결과 레코드에 표시되는 온도는 실제로 적용된 값이 아니라 **요청된** 값입니다. 그리고 `--significance`는 이것이 라벨이 아니라 결론 자체를 바꿀 수 있는 지점입니다. 온도를 생략하는 모델과 온도를 반영하는 모델을 비교하면 표본 추출로 인한 분산 차이가 생기는데, Welch나 Mann-Whitney는 이를 모델 품질 차이인 것처럼 보고합니다. 이 경우에도 경고가 표시됩니다. 영향을 받는 모델과 받지 않는 모델을 섞은 유의성 검정은 제공업체 기본 온도로 실행된 모델의 이름을 명시한 `Temperature not applied` 패널을 출력하고, JSON 출력의 `significance_temperature_mixed`를 `true`로 설정합니다. 여러 온도를 사용하면서 동시에 혼합된 실행에서는 두 메시지가 하나의 패널에 함께 표시됩니다. CSV에는 이에 상응하는 신호가 없습니다.
 
-## 저자 소개
+## 프로젝트 소개
 
-Cli Modelarium은 **[Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)**가 제작했습니다.
+Cli Modelarium은 **SoraVantia GK**의 제품입니다. **Lavelle Hatcher Jr**가 처음 제작했으며 계속 유지 관리하고 있습니다.
 
-### 연결
-
-- 💼 LinkedIn: [linkedin.com/in/lavellehatcherjr](https://linkedin.com/in/lavellehatcherjr)
-- 🐙 GitHub: [github.com/lavellehatcherjr](https://github.com/lavellehatcherjr)
-- 💬 이 프로젝트에 대한 질문: [이슈 열기](../../issues)
-- 📩 협업/기회: LinkedIn을 통해 연락
+- 📦 저장소: [github.com/SoraVantia/cli-modelarium](https://github.com/SoraVantia/cli-modelarium)
+- 💬 질문 또는 버그: [이슈 열기](../../issues)
+- 🔧 메인테이너: [Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)
 
 ## 제작 이유
 
@@ -426,6 +435,6 @@ Cli Modelarium은 한 가지를 잘 수행하는 작고 집중된 CLI 도구입�
 
 ---
 
-[Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)가 제작
+SoraVantia GK의 제품이며 [Lavelle Hatcher Jr](https://linkedin.com/in/lavellehatcherjr)가 제작 및 유지 관리합니다
 
 Apache 2.0 라이선스 하에 있습니다. 이슈, PR 및 대화를 환영합니다.
