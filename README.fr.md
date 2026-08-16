@@ -18,6 +18,10 @@ Note : Ce README est traduit à des fins d'accessibilité. L'outil CLI Cli Model
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-lightgrey)](#)
 
+```bash
+pip install cli-modelarium
+```
+
 <p align="center">
   <img src="docs/assets/cli-modelarium-demo.png" alt="Cli Modelarium help output showing the banner and available commands" width="520">
 </p>
