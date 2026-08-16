@@ -121,6 +121,118 @@ class TestRedactSecrets:
         assert "abc123" not in redacted
 
 
+class TestNvapiRedaction:
+    """The `nvapi-` rule, added in 0.1.6.
+
+    Before it existed only a fully echoed `Authorization: Bearer` header was
+    caught. A bare token in a JSON error body survived and reached the `error`
+    column of CSV and JSON output, which CI commonly uploads as an artifact.
+    """
+
+    NVAPI = "nvapi-abcdefghij1234567890ABCDEFGHIJ1234567890"
+
+    def test_bare_token_in_json_body(self) -> None:
+        redacted = security.redact_secrets(f'{{"error":"invalid key {self.NVAPI}"}}')
+        assert self.NVAPI not in redacted
+        assert "nvapi-***REDACTED***" in redacted
+
+    def test_token_in_url_query_string(self) -> None:
+        redacted = security.redact_secrets(f"https://integrate.api.nvidia.com/v1?k={self.NVAPI}")
+        assert self.NVAPI not in redacted
+        assert "nvapi-***REDACTED***" in redacted
+
+    def test_authorization_header_form_still_caught(self) -> None:
+        redacted = security.redact_secrets(f"Authorization: Bearer {self.NVAPI}")
+        assert self.NVAPI not in redacted
+
+    @pytest.mark.parametrize(
+        "benign",
+        [
+            "the nvapi-style endpoint is documented",
+            "nvapi-abc",
+            "nvidia/nemotron-3-ultra-550b-a55b",
+            "meta/llama-3.1-8b-instruct",
+        ],
+    )
+    def test_does_not_over_match(self, benign: str) -> None:
+        assert security.redact_secrets(benign) == benign
+
+
+class TestRedactionRegressionPins:
+    """Byte-identical pins for every pre-existing rule.
+
+    A future pattern addition placed above one of these could silently swallow
+    it into the wrong placeholder. These assert the exact output, not just that
+    something was redacted.
+    """
+
+    @pytest.mark.parametrize(
+        "secret,expected",
+        [
+            ("sk-proj-abc123XYZ456DEF789ghi", "sk-proj-***REDACTED***"),
+            ("sk-ant-api03-abc123XYZ456DEF789ghi", "sk-ant-***REDACTED***"),
+            ("sk-or-abc123XYZ456DEF789ghi", "sk-or-***REDACTED***"),
+            ("xai-abc123XYZ456DEF789ghi", "xai-***REDACTED***"),
+            ("gsk_abc123XYZ456DEF789ghi", "gsk_***REDACTED***"),
+            ("sk-abc123XYZ456DEF789ghi", "sk-***REDACTED***"),
+            ("AIzaSyABC123def456GHI789jkl012MNO345pqr678", "AIza***REDACTED***"),
+            ("nvapi-abc123XYZ456DEF789ghi", "nvapi-***REDACTED***"),
+        ],
+    )
+    def test_prefix_rule_output_is_exact(self, secret: str, expected: str) -> None:
+        assert security.redact_secrets(secret) == expected
+
+    def test_header_and_query_rules_unchanged(self) -> None:
+        assert (
+            security.redact_secrets("Authorization: Bearer abc123XYZ456DEF789ghi")
+            == "Authorization: Bearer ***REDACTED***"
+        )
+        assert security.redact_secrets("x-api-key: someValue1234567890") == (
+            "x-api-key: ***REDACTED***"
+        )
+        assert security.redact_secrets("api_key=abc123XYZdef") == "api_key=***REDACTED***"
+
+
+class TestKeyPatternsCoverage:
+    """Every provider `configure` prompts for must have a KEY_PATTERNS entry.
+
+    `configure` iterates `all_known_providers()` (derived from PRICING) with no
+    membership gate, and `validate_key` returns True when no pattern exists -
+    but `keys set` and `keys delete` both gate on KEY_PATTERNS membership. A
+    provider present in PRICING and absent from KEY_PATTERNS would therefore let
+    `configure` write a credential that `keys delete` then refuses to remove.
+
+    Deliberately a subset, not an equality: a provider may be wired in
+    PROVIDER_REGISTRY and KEY_PATTERNS before any model is registered. `nvidia`
+    was in that state when the provider landed and left it when its rows did.
+    """
+
+    def test_every_priced_provider_has_a_key_pattern(self) -> None:
+        from cli_modelarium.models_registry import all_known_providers
+
+        needs_key = set(all_known_providers()) - {"local"}
+        missing = needs_key - set(security.KEY_PATTERNS)
+        assert missing == set(), f"providers in PRICING with no KEY_PATTERNS entry: {missing}"
+
+    def test_nvidia_has_a_pattern_and_is_now_registered(self) -> None:
+        from cli_modelarium.models_registry import all_known_providers
+
+        assert "nvidia" in security.KEY_PATTERNS
+        assert "nvidia" in all_known_providers()
+
+    @pytest.mark.parametrize(
+        "key,valid",
+        [
+            ("nvapi-abcdefghij1234567890abcd", True),
+            ("nvapi-short", False),
+            ("sk-proj-abcdefghij1234567890", False),
+            ("abcdefghij1234567890abcdefgh", False),
+        ],
+    )
+    def test_nvidia_key_format_validation(self, key: str, valid: bool) -> None:
+        assert security.validate_key("nvidia", key) is valid
+
+
 class TestKeyringIntegration:
     def test_save_and_load(self) -> None:
         security.save_key("openai", "sk-proj-test1234567890abcdefghi")
