@@ -71,6 +71,12 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - 查看哪个模型首先完成，实时观察输出分歧
 - 来自所有 11 个提供商的流（底层使用 SSE）
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-comparison-demo.gif" alt="cli-modelarium 终端演示：三个模型并行实时流式传输对同一提示的响应，随后比较表显示每个模型的 Time-to-First-Token、延迟、令牌数和成本。" width="718">
+</p>
+
+**价格提示：** 演示中显示的成本来自录制时的单次运行。定价会变化；在依赖任何数字之前，请对照提供商进行验证。
+
 ### 📊 多种比较模式
 
 - **单一提示 vs. 多个模型** - 快速"哪个最好？"比较
