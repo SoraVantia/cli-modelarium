@@ -54,6 +54,7 @@ KEY_PATTERNS: dict[str, re.Pattern[str]] = {
     # Z.AI keys are commonly an `id.secret` token; accept dots alongside the
     # usual key characters. Shape-only check (length floor matches the others).
     "zai": re.compile(r"^[A-Za-z0-9._-]{20,}$"),
+    "nvidia": re.compile(r"^nvapi-[A-Za-z0-9_-]{20,}$"),
 }
 
 # Secondary environment-variable aliases, consulted ONLY after the primary
@@ -72,6 +73,10 @@ REDACT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"sk-or-[A-Za-z0-9_-]{10,}"), "sk-or-***REDACTED***"),
     (re.compile(r"xai-[A-Za-z0-9_-]{10,}"), "xai-***REDACTED***"),
     (re.compile(r"gsk_[A-Za-z0-9_-]{10,}"), "gsk_***REDACTED***"),
+    # NVIDIA keys are `nvapi-` prefixed. The Authorization/x-api-key rules below
+    # only catch a fully echoed header; a bare token in a JSON error body reached
+    # the `error` column of CSV and JSON output before this rule existed.
+    (re.compile(r"nvapi-[A-Za-z0-9_-]{10,}"), "nvapi-***REDACTED***"),
     (re.compile(r"sk-[A-Za-z0-9_-]{10,}"), "sk-***REDACTED***"),
     (re.compile(r"AIza[A-Za-z0-9_-]{20,}"), "AIza***REDACTED***"),
     (
