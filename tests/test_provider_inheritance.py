@@ -81,7 +81,7 @@ def test_openrouter_sends_required_headers(monkeypatch: pytest.MonkeyPatch) -> N
     OpenRouterProvider(api_key="sk-or-test-1234567890abcdefghi")
 
     headers = captured["default_headers"]
-    assert headers["HTTP-Referer"] == "https://github.com/lavellehatcherjr/cli-modelarium"
+    assert headers["HTTP-Referer"] == "https://github.com/SoraVantia/cli-modelarium"
     assert headers["X-Title"] == "Cli Modelarium"
 
 
