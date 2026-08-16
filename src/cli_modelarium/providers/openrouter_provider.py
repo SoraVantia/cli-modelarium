@@ -21,7 +21,7 @@ class OpenRouterProvider(OpenAIProvider):
     name: str = "openrouter"
     BASE_URL: str = "https://openrouter.ai/api/v1"
     DEFAULT_HEADERS: dict[str, str] = {
-        "HTTP-Referer": "https://github.com/lavellehatcherjr/cli-modelarium",
+        "HTTP-Referer": "https://github.com/SoraVantia/cli-modelarium",
         "X-Title": "Cli Modelarium",
     }
 
