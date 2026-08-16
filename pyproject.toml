@@ -4,11 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cli-modelarium"
-version = "0.1.5"
-description = "LLM comparison CLI for terminal-first developers. Compare 10 providers (OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Groq, OpenRouter, Alibaba/DashScope, Z.AI/GLM) + local Ollama/LM Studio side-by-side with parallel streaming, batch eval, LLM-as-judge, hallucination detection, assertions for CI/CD."
+version = "0.1.6"
+description = "Compare LLM outputs side by side from the terminal, with statistical significance testing, cost tracking and CI assertions. Eleven cloud providers plus local models."
 readme = "README.md"
 license = { file = "LICENSE" }
-authors = [{ name = "Lavelle Hatcher Jr" }]
+authors = [{ name = "SoraVantia GK" }]
+maintainers = [{ name = "Lavelle Hatcher Jr" }]
 requires-python = ">=3.11"
 keywords = [
     "llm",
@@ -20,6 +21,7 @@ keywords = [
     "cli",
     "openai",
     "anthropic",
+    "nvidia",
     "ollama",
     "bootstrap",
     "confidence-intervals",
@@ -45,12 +47,14 @@ dependencies = [
     "openai~=2.38",
     "anthropic>=0.104,<0.200",
     "google-genai~=2.6",
-    "mistralai>=2.4.7,<2.9.0",
+    # The 2.4.7 floor excludes 2.4.6, withdrawn from PyPI after a malicious release; do not lower it.
+    "mistralai>=2.4.7,<2.10.0",
     "httpx~=0.28",
     "click~=8.4",
     "rich~=15.0",
     "keyring~=25.7",
     "scipy>=1.17,<2.0",
+    "numpy>=1.17",
 ]
 
 [project.optional-dependencies]
@@ -63,9 +67,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/lavellehatcherjr/cli-modelarium"
-Repository = "https://github.com/lavellehatcherjr/cli-modelarium"
-Issues = "https://github.com/lavellehatcherjr/cli-modelarium/issues"
+Homepage = "https://github.com/SoraVantia/cli-modelarium"
+Repository = "https://github.com/SoraVantia/cli-modelarium"
+Issues = "https://github.com/SoraVantia/cli-modelarium/issues"
+Changelog = "https://github.com/SoraVantia/cli-modelarium/blob/main/CHANGELOG.md"
 
 [project.scripts]
 cli-modelarium = "cli_modelarium.cli:main"
