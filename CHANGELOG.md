@@ -2,6 +2,63 @@
 
 All notable changes to Cli Modelarium will be documented in this file.
 
+## [0.1.6] - 2026-08-15
+
+### Added
+
+- **NVIDIA NIM as an eleventh cloud provider, with nine models.** `NVIDIAProvider` is a thin `OpenAIProvider` subclass pointed at `https://integrate.api.nvidia.com/v1`, registered in `PROVIDER_REGISTRY` with a `KEY_PATTERNS` entry, so `keys set nvidia` / `keys delete nvidia` work and the key is read from `NVIDIA_API_KEY`. The nine: `google/gemma-4-31b-it`, `google/diffusiongemma-26b-a4b-it`, `nvidia/nemotron-3-ultra-550b-a55b`, `nvidia/llama-3.3-nemotron-super-49b-v1`, `nvidia/nemotron-mini-4b-instruct`, `mistralai/mistral-nemotron`, `minimaxai/minimax-m3`, `poolside/laguna-xs-2.1` and `meta/llama-3.1-8b-instruct`. Each was screened against all 83 chat entries in NVIDIA's catalog and then called live. Models already reachable through another provider are deliberately absent, as are any whose answer arrives only in `reasoning_content`, all multimodal ones (this tool sends no images), and one that measured 10.3s to first token against 0.2-0.9 for the rest.
+
+- **Cost is not tracked for these nine models, and three guards silently do not apply to them.** NVIDIA publishes no per-token rate for hosted NIM - not in the API, the featured-models feed or the catalog, and independently confirmed against LiteLLM, which carries 3,020 priced entries and exactly three NIM rows, all rerank, all zero. Their `PRICING` rows carry `0.0` because that is what the schema forces, **not** because they are free.
+
+  **`--max-cost` and `cost_under` provide no protection on this provider.** `--max-cost` compares against an estimate that is identically zero, so the gate never trips - even `--max-cost 0` proceeds. A `cost_under` assertion passes on any of these models regardless of the limit, so a CI job goes green on an assertion that never meaningfully ran. `--significance-metric cost_usd` should not be trusted while one of these models is in the comparison: its cost is a constant placeholder rather than a measurement, and a comparison against a real-cost arm can report a confident, fabricated result.
+
+  **Access is credit-metered rather than per-token, so you exhaust credits rather than receive a bill.** That is a different failure mode from every other provider in the table, and it is the thing "cost is not tracked" fails to convey on its own.
+
+  A caveat panel titled **Cost not tracked** carries all three points and fires on `compare` and `batch` whenever one of these models is in a run. It renders alongside the temperature caveat rather than replacing it, and goes to stderr when a machine payload owns stdout.
+
+  **Known limitation: the cost column shows `$0.000000` for these models, which is not a price.** A later release will render it accurately. Three surfaces the panel does not reach: a NIM model used **only** as `--judge` is not in the run's model list, so no panel fires and judge cost sums silently to zero; `list-models` and `pricing --all` render `$0.0000` for these rows with no panel anywhere near them, and `pricing` is the command whose entire job is stating cost; and the **file output paths** - `--output results.md`, `.json` or `.csv` contain the rows with no caveat at all, because the panel is console text and never enters the file.
+
+  **What that warning does and does not reach.** The sentence above reaches the human who sets a pipeline up, once. It does not reach the pipeline. A scripted consumer reads JSON, and the JSON carries no pricing caveat key: `total_cost_usd` reports `0` with nothing distinguishing it from a genuinely free run, and there is no top-level key marking which models were unpriced - unlike the temperature caveat, which has `models_without_temperature` and `significance_temperature_mixed`. Until a later release adds one, an automated consumer has no signal on any surface.
+
+- NVIDIA models are in **no group**. They are excluded from the dynamic `all` group alongside `local` and `openrouter`, and from every static group. `all` otherwise means every model whose cost can be stated; the registry already holds four duplicate-weight pairs each neutralised only because OpenRouter is excluded, so NVIDIA would be the first provider able to put a genuine duplicate there; and a run exits `2` if any cell errors, while roughly half NVIDIA's catalog was unreachable when screened and availability moves between runs.
+- The `KEY_PATTERNS` entry closes a split-brain before it can open. `configure` iterates `all_known_providers()` with no membership gate and `validate_key()` returns True for a provider with no pattern, while `keys set` and `keys delete` both gate on `KEY_PATTERNS` membership - so a provider present in `PRICING` and absent from `KEY_PATTERNS` would let `configure` write a credential that `keys delete` then refuses to remove. A test pins the invariant as a subset (every provider in `PRICING` except `local` must have a pattern) rather than an equality, so a provider can be wired before its models are registered.
+- `tests/test_nvidia_provider.py`, following the per-provider file precedent set by `tests/test_zai_provider.py` rather than extending `tests/test_provider_inheritance.py`, whose three hand-maintained literal lists already omit `ZAIProvider` entirely.
+
+### Changed
+
+- **The nine READMEs document NVIDIA NIM.** The provider count is now eleven, the supported-providers table carries an NVIDIA NIM row reading **No published rate** under cost tracking, and the *Pricing data* section records that cost is not tracked and that `--max-cost` and `cost_under` give no protection there. Translated in place in all eight non-English files.
+
+- **The project moved to SoraVantia GK.** The repository is now at [github.com/SoraVantia/cli-modelarium](https://github.com/SoraVantia/cli-modelarium), and the copyright holder in `LICENSE` and `NOTICE` is SoraVantia GK. Cli Modelarium was created by Lavelle Hatcher Jr, who continues to maintain it - `pyproject.toml` now records SoraVantia GK as `authors` and Lavelle Hatcher Jr as `maintainers`, and PyPI renders both.
+
+  **Nothing about installing or using the tool changes.** The package is still `cli-modelarium` on PyPI, the command is still `cli-modelarium`, and the import path is still `cli_modelarium`. No code path, flag, output format or default changed.
+
+  This is not a licence change. Cli Modelarium remains under Apache License 2.0; only the copyright holder moved. Third-party attributions in `NOTICE` are untouched.
+
+  Repository links were updated across all nine READMEs, `CONTRIBUTING.md`, `SECURITY.md`, `pyproject.toml` and `.github/FUNDING.yml`. One is not documentation: the `HTTP-Referer` header the OpenRouter provider sends identifies the project by repository URL, and now carries the new one.
+
+### Fixed
+
+- **The privacy note now covers all three output formats.** It warned that JSON embeds the full prompt and the full model response and named `results.json` alone, which implied CSV and Markdown were safe to publish. All three carry the same content - CSV has `prompt`, `system`, `output` and `error` columns, and the Markdown report embeds both in full - and CSV is the likeliest of the three to be uploaded as a CI artifact. Corrected in all nine READMEs.
+
+- **Repository URLs now use the lowercase repository name.** The repository is at [github.com/SoraVantia/cli-modelarium](https://github.com/SoraVantia/cli-modelarium), matching the PyPI package, the command and the import path; links written `Cli-Modelarium` were updated across the nine READMEs, `CONTRIBUTING.md`, `SECURITY.md`, `pyproject.toml`, this file and the OpenRouter `HTTP-Referer` header. The project name is unchanged - only the URL. `github.com` resolves case-insensitively, but `raw.githubusercontent.com` does not, and the two absolute asset URLs README.md carries are the ones PyPI renders.
+
+- **The `all` group excludes NVIDIA, and all nine READMEs now say so.** They described `all` as excluding local models and OpenRouter; `_resolve_all_cloud` excludes local, OpenRouter and NVIDIA. A user who configured `NVIDIA_API_KEY` and ran `--models all` got no NIM models and no explanation. The sentence now names all three and gives the reason in a clause.
+
+- **The eight translations documented manual re-running instead of `--runs`.** They carried the pre-`--runs` advice to run the same comparison three to five times and look for patterns - wrong advice rather than missing advice, since the flag has done it automatically for several releases. Both bullets README.md documents it in are now translated, along with the coefficient-of-variation threshold, the `stats_by_cell` JSON key and the `--runs` plus `--check-hallucination` combination. `System requirements` is also translated rather than left English-only, so the note naming seven English-only sections is now accurate. `tests/test_readme_parity.py` pins all of it: the provider count, the temperature model list, every static group row, the date set and the heading structure are asserted against the registry across all nine files, so a fact can no longer drift in documentation while the code moves.
+
+- **The READMEs now list every provider's environment variable and name the correct set of models that omit temperature.** The headless-Linux export block carried nine variables for eleven cloud providers - `ZAI_API_KEY` had been missing since Z.AI landed in 0.1.4 - and the comparison-methodology section listed nine models as omitting the temperature field when the registry has twelve, the three `gpt-5.6` variants added in 0.1.5 having gone unrecorded.
+
+### Security
+
+- `redact_secrets()` now removes `nvapi-` prefixed tokens. The `Authorization: Bearer`, `x-api-key:` and `api_key=` rules already caught it, because those match on the surrounding marker rather than on the key's shape, but a bare token quoted in a JSON error body carries no marker and nothing matched it. Redacted provider errors reach the `error` column of both CSV and JSON output, which CI pipelines commonly upload as an artifact, so the gap ended at a file people publish.
+
+  **Scope, stated precisely: this was not reachable at 0.1.5.** Nothing read `NVIDIA_API_KEY` - every `load_key()` and `is_key_configured()` call site is driven by `all_known_providers()`, which derives from `PRICING`, and no NVIDIA model was registered - so no `nvapi-` token could enter an error string through the tool. The gap was in the redaction table, not in a live path. It is fixed in the same release that makes it reachable, not after. The seven pre-existing prefix rules are unaffected and are now pinned to their exact output by a regression test, so a future pattern addition cannot silently swallow one into the wrong placeholder.
+
+### Dependencies
+
+- Widened `mistralai` from `>=2.4.7,<2.9.0` to `>=2.4.7,<2.10.0`. The 2.8 line is terminal - 2.8.0 was its only release - and this SDK ships forward-only generated releases without backports, so an upstream security patch would land at 2.9 or above and the old ceiling would have kept it from reaching users. 2.9.3 was run against the full suite. The floor stays at `2.4.7`: it excludes the withdrawn 2.4.6 release (GHSA-wx9m-wx4f-4cmg).
+- Declared `numpy>=1.17` explicitly. It was already installed as a transitive dependency of `scipy`, but `run_statistics.py` imports it directly, so the import now rests on a declaration rather than on another package's requirements. The floor is what the code uses: `numpy.random.default_rng` and `Generator.integers` arrived in 1.17.0. No ceiling - no numpy release has broken this project.
+
 ## [0.1.5] - 2026-08-07
 
 ### Breaking
