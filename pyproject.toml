@@ -44,7 +44,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "openai~=2.38",
+    "openai~=3.0",
     "anthropic>=0.104,<0.200",
     "google-genai~=2.6",
     # The 2.4.7 floor excludes 2.4.6, withdrawn from PyPI after a malicious release; do not lower it.
