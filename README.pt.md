@@ -71,6 +71,12 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - Veja qual modelo termina primeiro, observe as saídas divergirem em tempo real
 - Streams de todos os 11 provedores (SSE por baixo)
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-comparison-demo.gif" alt="Demonstração do cli-modelarium no terminal: três modelos transmitem suas respostas ao mesmo prompt em paralelo e, em seguida, uma tabela de comparação mostra o Time-to-First-Token, a latência, as contagens de tokens e o custo por modelo." width="718">
+</p>
+
+**Nota de preços:** os valores de custo nas demos são de uma única execução no momento da gravação. Os preços mudam; verifique com o provedor antes de confiar em qualquer valor.
+
 ### 📊 Múltiplos modos de comparação
 
 - **Prompt único vs. múltiplos modelos** - comparações rápidas de "qual é o melhor?"
