@@ -116,6 +116,7 @@ PROVIDER_REGISTRY: dict[str, str] = {
     "mistral": "cli_modelarium.providers.mistral_provider:MistralProvider",
     "dashscope": "cli_modelarium.providers.dashscope_provider:DashScopeProvider",
     "zai": "cli_modelarium.providers.zai_provider:ZAIProvider",
+    "nvidia": "cli_modelarium.providers.nvidia_provider:NVIDIAProvider",
     "local": "cli_modelarium.providers.local_provider:LocalProvider",
 }
 
@@ -477,6 +478,7 @@ def compare(
         _warn_temperature_conditions(
             model_list, temp_list, significance_runs=significance_runs
         )
+        _warn_unpriced_models(model_list)
         system_prompt_list = _resolve_system_prompts(
             system_prompt=system_prompt,
             system_prompts=system_prompts,
@@ -982,6 +984,7 @@ def batch(
         model_list = _resolve_dynamic_groups(model_list, local_url)
         temp_list = _parse_temperatures(temperatures)
         _warn_temperature_sweep(model_list, temp_list)
+        _warn_unpriced_models(model_list)
         command_sp_list = _resolve_system_prompts(
             system_prompt=system_prompt,
             system_prompts=system_prompts,
@@ -1960,6 +1963,56 @@ def _significance_caveat(omitted: list[str]) -> str:
     )
 
 
+def _models_without_pricing(models: list[str]) -> list[str]:
+    """Registered models whose provider publishes no per-token rate.
+
+    Provider-keyed rather than value-keyed on purpose: `cost_usd == 0.0` is also
+    true of local models and of the seven genuinely-free rows, so the value
+    cannot distinguish an unpriced model from a free one. Absent from PRICING
+    means priced, matching every other predicate in this module.
+    """
+    return sorted({m for m in models if PRICING.get(m, {}).get("provider") == "nvidia"})
+
+
+def _pricing_caveat(affected: list[str]) -> str:
+    """Cost is unavailable for these models, and three guards silently do not apply."""
+    return (
+        f"Cost is not tracked for {', '.join(affected)}. NVIDIA publishes no "
+        f"per-token rate for hosted NIM, so the cost column shows zero, which is "
+        f"not a price - access is credit-metered, so you can exhaust credits "
+        f"rather than be billed.\n\n"
+        f"--max-cost and cost_under provide no protection on this provider.\n\n"
+        f"--significance-metric cost_usd should not be trusted while one of these "
+        f"is in the comparison: its cost is a constant placeholder rather than a "
+        f"measurement."
+    )
+
+
+def _warn_unpriced_models(models: list[str]) -> None:
+    """Warn that cost is unavailable for any NIM model in this run.
+
+    A SEPARATE panel rather than a condition merged into the temperature one.
+    That panel's title is hardcoded to "Temperature not applied", so a cost
+    caveat merged into it renders under a heading about temperature. Emitting
+    separately also keeps `_warn_temperature_sweep` untouched - routing this
+    through it would hit its `len(temperatures) < 2` early return, which a NIM
+    model at a single temperature would never pass.
+
+    Call this AFTER group expansion, alongside the temperature emitter. Neither
+    suppresses the other; both panels render when both conditions hold.
+    """
+    affected = _models_without_pricing(models)
+    if not affected:
+        return
+    console.print(
+        Panel(
+            _pricing_caveat(affected),
+            title="Cost not tracked",
+            border_style="yellow",
+        )
+    )
+
+
 def _warn_temperature_sweep(models: list[str], temperatures: list[float]) -> None:
     """Warn when a multi-value sweep includes a model that ignores temperature.
 
@@ -2093,11 +2146,20 @@ def _resolve_all_cloud() -> list[str]:
 
     Excludes local models and the OpenRouter entries (the latter are a few
     registered rows, not OpenRouter's full catalog).
+
+    NVIDIA is excluded for three reasons. `all` otherwise means every model whose
+    cost can be stated, and the NIM rows cannot. The registry already holds four
+    duplicate-weight pairs, each neutralised only because OpenRouter is excluded,
+    so NVIDIA would be the first provider able to put a genuine duplicate here.
+    And a run exits 2 if any cell errors: roughly half NVIDIA's catalog was
+    unreachable when screened and availability moves between runs, so one
+    unreachable model would fail an otherwise-successful run while the exit code
+    suggests a credential problem.
     """
     out: list[str] = []
     for model, entry in PRICING.items():
         provider = str(entry.get("provider", ""))
-        if provider in ("local", "openrouter") or model.endswith("/*"):
+        if provider in ("local", "openrouter", "nvidia") or model.endswith("/*"):
             continue
         if is_key_configured(provider):
             out.append(model)
