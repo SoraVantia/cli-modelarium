@@ -67,6 +67,10 @@ That's it. You'll see all three models stream their responses live in parallel, 
 - See which model finishes first, watch outputs diverge in real time
 - Streams from all 11 providers (SSE under the hood)
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/SoraVantia/cli-modelarium/main/docs/assets/cli-modelarium-comparison-demo.gif" alt="Terminal demo of cli-modelarium: three models (gpt-4o-mini, claude-haiku-4-5, gemini-3.1-flash-lite) stream answers to the same prompt in parallel, then a comparison table reports time-to-first-token, latency, token counts and cost per model." width="718">
+</p>
+
 ### 📊 Multiple comparison modes
 
 - **Single prompt vs. multiple models** - quick "which is best?" comparisons
