@@ -95,6 +95,10 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - **自定义标准** - 定义您自己的评分规则
 - **自评自动跳过** - 当评判模型也是被评判对象时自动跳过
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-runs-demo.gif" alt="cli-modelarium 终端演示：同一提示在两个模型上重复运行多次，随后显示变异系数、自举置信区间和成对统计显著性判定。" width="1428">
+</p>
+
 ### 💾 输出格式
 
 - **实时终端** - 基于 Rich 的面板，带有进度条和流式显示
