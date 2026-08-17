@@ -95,6 +95,10 @@ Eso es todo. Verá los tres modelos transmitir sus respuestas en vivo en paralel
 - **Criterios personalizados** - Defina sus propias rúbricas de puntuación
 - **Auto-omisión de autoevaluación** - Los modelos jueces se omiten automáticamente cuando también están siendo juzgados
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-runs-demo.gif" alt="Demostración en terminal de cli-modelarium: el mismo prompt se repite varias veces en dos modelos y luego se informan el coeficiente de variación, los intervalos de confianza bootstrap y un veredicto de significancia estadística por pares." width="1428">
+</p>
+
 ### 💾 Formatos de salida
 
 - **Terminal en vivo** - Paneles basados en Rich con barras de progreso y visualización de streaming
