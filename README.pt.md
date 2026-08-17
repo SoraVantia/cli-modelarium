@@ -95,6 +95,10 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - **Critérios personalizados** - Defina suas próprias rubricas de pontuação
 - **Auto-pular auto-avaliação** - Modelos juízes automaticamente pulados quando também estão sendo julgados
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-runs-demo.gif" alt="Demonstração do cli-modelarium no terminal: o mesmo prompt é repetido várias vezes em dois modelos e, em seguida, são informados o coeficiente de variação, os intervalos de confiança bootstrap e um veredito de significância estatística entre pares." width="1428">
+</p>
+
 ### 💾 Formatos de saída
 
 - **Terminal ao vivo** - Painéis baseados em Rich com barras de progresso e exibição de streaming
