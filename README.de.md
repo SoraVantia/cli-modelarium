@@ -95,6 +95,10 @@ Das ist alles. Sie sehen alle drei Modelle ihre Antworten parallel live streamen
 - **Benutzerdefinierte Kriterien** - Definieren Sie Ihre eigenen Bewertungsrubriken
 - **Auto-Skip bei Selbstbewertung** - Judge-Modelle werden automatisch übersprungen, wenn sie auch bewertet werden
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-runs-demo.gif" alt="Terminal-Demo von cli-modelarium: derselbe Prompt wird mehrfach über zwei Modelle wiederholt, anschließend werden Variationskoeffizient, Bootstrap-Konfidenzintervalle und ein paarweises statistisches Signifikanzurteil ausgegeben." width="1428">
+</p>
+
 ### 💾 Ausgabeformate
 
 - **Live-Terminal** - Rich-basierte Panels mit Fortschrittsbalken und Streaming-Anzeige
