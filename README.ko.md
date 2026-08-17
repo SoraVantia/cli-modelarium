@@ -95,6 +95,10 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - **사용자 정의 기준** - 자신만의 스코어링 루브릭 정의
 - **자기 평가 자동 건너뛰기** - 저지 모델이 평가 대상이기도 할 때 자동으로 건너뜀
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-runs-demo.gif" alt="cli-modelarium 터미널 데모: 동일한 프롬프트를 두 모델에서 여러 번 반복한 후, 변동 계수, 부트스트랩 신뢰 구간 및 쌍별 통계적 유의성 판정이 표시됩니다." width="1428">
+</p>
+
 ### 💾 출력 형식
 
 - **라이브 터미널** - 진행 바 및 스트리밍 표시가 있는 Rich 기반 패널
