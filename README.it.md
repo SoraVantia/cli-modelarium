@@ -95,6 +95,10 @@ Ecco fatto. Si vedranno tutti e tre i modelli trasmettere le loro risposte in pa
 - **Criteri personalizzati** - Definire le proprie rubriche di scoring
 - **Auto-skip dell'autovalutazione** - I modelli giudici vengono automaticamente saltati quando sono anche giudicati
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-runs-demo.gif" alt="Dimostrazione di cli-modelarium nel terminale: lo stesso prompt viene ripetuto più volte su due modelli, poi vengono riportati il coefficiente di variazione, gli intervalli di confidenza bootstrap e un verdetto di significatività statistica a coppie." width="1428">
+</p>
+
 ### 💾 Formati di output
 
 - **Terminal live** - Pannelli basati su Rich con barre di avanzamento e visualizzazione streaming
