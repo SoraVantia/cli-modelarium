@@ -91,6 +91,10 @@ That's it. You'll see all three models stream their responses live in parallel, 
 - **Custom criteria** - Define your own scoring rubrics
 - **Self-evaluation auto-skip** - Judge models automatically skipped when also being judged
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/SoraVantia/cli-modelarium/main/docs/assets/cli-modelarium-runs-demo.gif" alt="Terminal demo of cli-modelarium repeating the same prompt several times across two models, then reporting coefficient of variation, bootstrap confidence intervals and a pairwise statistical significance verdict." width="1428">
+</p>
+
 ### 💾 Output formats
 
 - **Live terminal** - Rich-powered panels with progress bars and streaming display
