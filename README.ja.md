@@ -71,6 +71,12 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - どのモデルが最初に終了するかを確認し、出力の分岐をリアルタイムで観察
 - 11のプロバイダーすべてからストリーミング（内部ではSSEを使用）
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-comparison-demo.gif" alt="cli-modelarium のターミナルデモ: 3つのモデルが同じプロンプトへのレスポンスを並列でライブストリーミングし、続いて比較テーブルにモデルごとの Time-to-First-Token、レイテンシー、トークン数、コストが表示されます。" width="718">
+</p>
+
+**料金に関する注意:** デモに表示されるコストは録画時点の単一実行のものです。料金は変更されます。いずれの数値も、依拠する前に必ず各プロバイダーで確認してください。
+
 ### 📊 複数の比較モード
 
 - **単一プロンプト vs. 複数モデル** - 「どれが最良か？」を素早く比較
@@ -88,6 +94,10 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - **ハルシネーション検出プリセット** - 事実の正確性チェックのための、すぐに使える基準
 - **カスタム基準** - 独自のスコアリングルーブリックを定義
 - **自己評価の自動スキップ** - ジャッジモデルが評価対象でもある場合、自動的にスキップされます
+
+<p align="center">
+  <img src="docs/assets/cli-modelarium-runs-demo.gif" alt="cli-modelarium のターミナルデモ: 同じプロンプトを2つのモデルで複数回繰り返し、続いて変動係数、ブートストラップ信頼区間、およびペアごとの統計的有意性の判定が表示されます。" width="1428">
+</p>
 
 ### 💾 出力フォーマット
 
