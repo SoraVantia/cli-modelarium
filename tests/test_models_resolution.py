@@ -37,8 +37,8 @@ def _models_for(*providers: str) -> set[str]:
 
 
 def test_all_resolves_to_configured_providers_models() -> None:
-    security.save_key("openai", "sk-proj-test1234567890abcdefghi")
-    security.save_key("anthropic", "sk-ant-test1234567890abcdefghi")
+    security.save_key("openai", "sk-proj-NOT_A_REAL_KEY_test_fixture_00")
+    security.save_key("anthropic", "sk-ant-NOT_A_REAL_KEY_test_fixture_0")
 
     resolved = _resolve_dynamic_groups(["all"], None)
 
@@ -96,8 +96,8 @@ def test_all_local_unreachable_returns_empty_no_raise(
 
 def test_all_excludes_local_and_openrouter(monkeypatch: pytest.MonkeyPatch) -> None:
     # Configure providers whose presence would otherwise leak local/openrouter ids.
-    security.save_key("openai", "sk-proj-test1234567890abcdefghi")
-    security.save_key("openrouter", "sk-or-test1234567890abcdefghi")
+    security.save_key("openai", "sk-proj-NOT_A_REAL_KEY_test_fixture_00")
+    security.save_key("openrouter", "sk-or-NOT_A_REAL_KEY_test_fixture_0")
     resolved = _resolve_all_cloud()
     assert all(not m.startswith("local/") for m in resolved)
     assert all(PRICING[m]["provider"] != "openrouter" for m in resolved)
@@ -108,7 +108,7 @@ def test_all_excludes_local_and_openrouter(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_all_plus_explicit_model_dedupes() -> None:
-    security.save_key("openai", "sk-proj-test1234567890abcdefghi")
+    security.save_key("openai", "sk-proj-NOT_A_REAL_KEY_test_fixture_00")
     resolved = _resolve_dynamic_groups(["all", "gpt-5.5"], None)
     assert resolved.count("gpt-5.5") == 1
 
