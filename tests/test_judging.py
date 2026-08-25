@@ -8,6 +8,7 @@ Three layers:
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import AsyncIterator
 from typing import Any
@@ -214,6 +215,32 @@ class TestBuildJudgePrompt:
             template=custom,
         )
         assert prompt == "EVAL: - only :: orig :: resp"
+
+    def test_rendered_prompt_has_no_escaped_braces(self) -> None:
+        """The example the judge is shown must be the JSON we want back.
+
+        build_judge_prompt substitutes with str.replace, so `{{` is never
+        unescaped - it reaches the model verbatim, and a judge that copies
+        it emits JSON that parse_judge_response discards. Asserted on the
+        RENDERED prompt: reading the template source hid this for releases.
+        """
+        prompt = build_judge_prompt("q", "r", ["acc"])
+        assert "{{" not in prompt and "}}" not in prompt
+
+    def test_rendered_example_is_parseable_and_reasoning_first(self) -> None:
+        """The format example must parse, and reason before it scores."""
+        prompt = build_judge_prompt("q", "r", ["acc"])
+        # Anchored on the instruction line, not "first line starting with {":
+        # the response is substituted ABOVE the example, so a line-based
+        # selector picks the wrong line once the response carries JSON.
+        start = prompt.index("{", prompt.index("Respond with ONLY"))
+        end = prompt.index("}", start) + 1
+        concrete = (
+            prompt[start:end]
+            .replace("<1-10 integer>", "8")
+            .replace("<one sentence explanation>", "x")
+        )
+        assert list(json.loads(concrete)) == ["reasoning", "score"]
 
 
 # ===== fake judge provider =====
