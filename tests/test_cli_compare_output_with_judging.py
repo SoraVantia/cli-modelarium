@@ -84,8 +84,8 @@ def dual_provider(monkeypatch: pytest.MonkeyPatch) -> _DualPurposeProvider:
         lambda name, **_kwargs: fake,
     )
     for env, value in (
-        ("OPENAI_API_KEY", "sk-proj-test1234567890abcdefghi"),
-        ("ANTHROPIC_API_KEY", "sk-ant-test1234567890abcdefghi"),
+        ("OPENAI_API_KEY", "sk-proj-NOT_A_REAL_KEY_test_fixture_00"),
+        ("ANTHROPIC_API_KEY", "sk-ant-NOT_A_REAL_KEY_test_fixture_0"),
     ):
         monkeypatch.setenv(env, value)
     return fake
