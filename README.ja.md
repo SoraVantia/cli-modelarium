@@ -197,6 +197,12 @@ cli-modelarium "Explain recursion in one paragraph" \
   --judge-criteria "accuracy,clarity,brevity"
 ```
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-judge-demo.gif" alt="cli-modelarium のターミナルデモ: LLMジャッジが2つのモデルを採点し、比較テーブルにモデルごとのスコアが表示された後、各回答の下にジャッジの記述による評価理由が表示されます。" width="848">
+</p>
+
+**デモに関する注意:** スコアとコストは録画時点の単一実行のものです。ジャッジのスコアは参考信号であり、正解ではありません。実行ごと、モデルバージョンごとに正確には再現されません。料金は変わります。数値に依拠する前にプロバイダーで確認してください。
+
 ### 既知の事実に対するハルシネーション検出
 
 ```bash
@@ -260,7 +266,7 @@ fi
 
 `--output-format json` が必要です。デフォルトの出力には機械可読なエラーフィールドがありません。なお、モデルを呼び出す*前*に発生した失敗（キーの未設定、未知のモデル、不正なバッチファイル）ではJSONがまったく生成されないため、その場合はコンソールのメッセージが唯一の手がかりになります。
 
-**プライバシーに関する注意:** JSON、CSV、Markdown のいずれの出力形式にも、各結果のプロンプト全文とモデル応答全文、さらにプロバイダーのエラーメッセージが含まれます。出力ファイルをコミットしたり、公開されるCIアーティファクトとしてアップロードしたりする前に、機密情報として扱ってください。
+**プライバシーに関する注意:** JSON、CSV、Markdown のいずれの出力形式にも、各結果のプロンプト全文とモデル応答全文、さらにプロバイダーのエラーメッセージが含まれます。JSON にはさらに各ジャッジモデルの推論テキストが含まれます。`--include-reasoning` はコンソール表示のみを制御し、ファイルには影響しません。CSV と Markdown には含まれません。出力ファイルをコミットしたり、公開されるCIアーティファクトとしてアップロードしたりする前に、機密情報として扱ってください。
 
 ## 設定
 
@@ -339,7 +345,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 
 | グループ | モデル |
 |-------|--------|
-| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
+| `all-premium` / `all-flagship` | gpt-5.6-sol, claude-opus-5, gemini-3.1-pro-preview, grok-4.6, deepseek-v4-pro, mistral-large-latest, qwen3.8-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
 | `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
@@ -368,7 +374,7 @@ Cli Modelarium は、OpenAIの `messages` 配列、Anthropicのトップレベ�
 
 ### 価格データ
 
-Cli Modelarium に組み込まれているすべての価格は、**2026年7月29日** に公式プロバイダードキュメントから検証されました。Z.AI/GLM の価格のみ例外です。これらは **2026年6月22日** という以前の検証日を保持しており、直近の検証には含まれておらず、それ以降エントリは変更されていません。LLMの価格は頻繁に変更されます（時には月単位で）。`pricing_as_of` 日付は JSON 出力に含まれ、コンソールにも表示されます。CSV 出力と Markdown 出力には含まれません。予算編成や本番環境の決定にコスト計算を信頼する前に、必ず各プロバイダーの公式価格ページと照合してください。
+Cli Modelarium に組み込まれている価格の大半は、**2026年7月29日** に公式プロバイダードキュメントから検証されました。一部のエントリは、レジストリ内の各項目の横に記載された独自の検証日を持ちます。Z.AI/GLM の価格が最も古く、**2026年6月22日** です。LLMの価格は頻繁に変更されます（時には月単位で）。`pricing_as_of` 日付は JSON 出力に含まれ、コンソールにも表示されます。CSV 出力と Markdown 出力には含まれません。予算編成や本番環境の決定にコスト計算を信頼する前に、必ず各プロバイダーの公式価格ページと照合してください。
 
 価格は、各プロバイダーの100万トークンあたりの標準/定価の公開レートです（バッチ、優先、オフピーク、プロモーション価格ではありません）。入力サイズによってティアが分かれるモデルでは、エントリー/短コンテキストのティアを表示し、キャッシュ価格はキャッシュ読み取りレートです。DashScope/Qwenのコストは非思考（non-thinking）レートを反映しています（ツールは `enable_thinking=false` を送信します）。
 
