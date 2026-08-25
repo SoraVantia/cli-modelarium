@@ -1,19 +1,18 @@
 """Deterministic assertions for batch evaluation.
 
 Ten assertion types implement mechanical pass/fail checks over LLM outputs.
-The whole point is that "deterministic" means: given the same output, the
-result is always the same - no LLM judge in the loop, no fuzziness. Useful
-for prompt regression tests in CI/CD.
+"Deterministic" means: given the same output, the result is always the same -
+no LLM judge in the loop, no fuzziness. Useful for prompt regression tests in
+CI/CD.
 
 The dispatcher is data-driven: a `dict[str, callable]` maps each type to
 its check function. Adding a new type means adding one entry plus one
 function.
 
 `jsonschema` is an OPTIONAL dependency. Nine of ten assertion types work
-without it; only `json_schema` needs it. The import happens inside the
-check function so:
-    a) tests can simulate a missing install with monkeypatch
-    b) users who don't need schema validation don't pay the import cost
+without it; only `json_schema` needs it. The import happens inside the check
+function so tests can simulate a missing install with monkeypatch, and users
+who don't need schema validation don't pay the import cost.
 """
 
 from __future__ import annotations
