@@ -77,7 +77,7 @@ def _make_provider(
         return _FakeClient(completions)
 
     monkeypatch.setattr("cli_modelarium.providers.openai_provider.AsyncOpenAI", fake_async_openai)
-    provider = NVIDIAProvider(api_key="nvapi-test1234567890abcdefghi")
+    provider = NVIDIAProvider(api_key="nvapi-NOT_A_REAL_KEY_test_fixture_0")
     return provider, completions, captured
 
 
@@ -110,7 +110,7 @@ def test_registry_import_string_resolves() -> None:
 
 def test_forwards_api_key_and_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
     _, _, captured = _make_provider(monkeypatch, response=None)
-    assert captured["api_key"] == "nvapi-test1234567890abcdefghi"
+    assert captured["api_key"] == "nvapi-NOT_A_REAL_KEY_test_fixture_0"
     assert captured["base_url"] == "https://integrate.api.nvidia.com/v1"
 
 
@@ -189,8 +189,8 @@ def test_all_resolution_excludes_nvidia(monkeypatch: pytest.MonkeyPatch) -> None
     The pre-existing pinning test asserts only what IS excluded, so it stays
     green either way; this is the assertion that makes the new exclusion tested.
     """
-    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-abcdefghij1234567890abcd")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-abcdefghij1234567890")
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-NOT_A_REAL_KEY_test_fixture_1")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-NOT_A_REAL_KEY_test_fixture_00")
     resolved = cli_module._resolve_all_cloud()
     assert [m for m in resolved if PRICING.get(m, {}).get("provider") == "nvidia"] == []
     # The control: a priced provider with a key set still resolves.
