@@ -197,6 +197,12 @@ cli-modelarium "Explain recursion in one paragraph" \
   --judge-criteria "accuracy,clarity,brevity"
 ```
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-judge-demo.gif" alt="cli-modelarium 터미널 데모: LLM 저지가 두 모델을 채점하고, 비교 표에 모델별 점수가 표시된 뒤 각 답변 아래에 저지가 작성한 평가 근거가 나타납니다." width="848">
+</p>
+
+**데모 관련 참고:** 점수와 비용은 녹화 시점의 단일 실행 결과입니다. 저지 점수는 참고 신호이지 절대적 기준이 아니며, 실행이나 모델 버전에 따라 정확히 재현되지 않습니다. 가격은 변경됩니다. 수치에 의존하기 전에 제공업체에서 확인하십시오.
+
 ### 알려진 사실에 대한 환각 감지
 
 ```bash
@@ -260,7 +266,7 @@ fi
 
 `--output-format json` 이 필요합니다. 기본 출력에는 기계가 읽을 수 있는 오류 필드가 없습니다. 모델을 호출하기 *전에* 발생한 실패(키 누락, 알 수 없는 모델, 잘못된 배치 파일)에서는 JSON이 전혀 생성되지 않으므로, 그런 경우에는 콘솔 메시지가 유일한 신호입니다.
 
-**개인정보 관련 참고:** JSON, CSV, Markdown 등 모든 출력 형식에는 각 결과의 전체 프롬프트와 전체 모델 응답, 그리고 제공업체의 오류 메시지가 포함됩니다. 출력 파일을 커밋하거나 공개 CI 아티팩트로 업로드하기 전에 민감한 정보로 취급하십시오.
+**개인정보 관련 참고:** JSON, CSV, Markdown 등 모든 출력 형식에는 각 결과의 전체 프롬프트와 전체 모델 응답, 그리고 제공업체의 오류 메시지가 포함됩니다. JSON에는 각 판정 모델의 추론 텍스트도 포함됩니다. `--include-reasoning`은 콘솔 표시만 제어하며 파일에는 영향을 주지 않고, CSV와 Markdown에는 포함되지 않습니다. 출력 파일을 커밋하거나 공개 CI 아티팩트로 업로드하기 전에 민감한 정보로 취급하십시오.
 
 ## 구성
 
@@ -339,7 +345,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 
 | 그룹 | 모델 |
 |-------|--------|
-| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
+| `all-premium` / `all-flagship` | gpt-5.6-sol, claude-opus-5, gemini-3.1-pro-preview, grok-4.6, deepseek-v4-pro, mistral-large-latest, qwen3.8-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
 | `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
@@ -368,7 +374,7 @@ Cli Modelarium은 OpenAI의 `messages` 배열, Anthropic의 최상위 `system` �
 
 ### 가격 데이터
 
-Cli Modelarium에 포함된 모든 가격은 **2026년 7월 29일**에 공식 제공자 문서에서 검증되었습니다. Z.AI/GLM 가격만 예외입니다. 이들은 **2026년 6월 22일**이라는 이전 검증 날짜를 유지하며 가장 최근 검증에 포함되지 않았고, 그 이후로 항목이 변경되지 않았습니다. LLM 가격은 자주 변경됩니다(때로는 매월). `pricing_as_of` 날짜는 JSON 출력에 포함되고 콘솔에 표시됩니다. CSV 및 Markdown 출력에는 포함되지 않습니다. 예산 책정이나 프로덕션 결정을 위해 비용 계산에 의존하기 전에 항상 각 제공자의 공식 가격 페이지와 대조하여 확인하십시오.
+Cli Modelarium에 포함된 대부분의 가격은 **2026년 7월 29일**에 공식 제공자 문서에서 검증되었습니다. 일부 항목은 레지스트리에서 각 항목 옆에 기재된 자체 검증 날짜를 가집니다. Z.AI/GLM 가격이 가장 오래되었으며 **2026년 6월 22일**입니다. LLM 가격은 자주 변경됩니다(때로는 매월). `pricing_as_of` 날짜는 JSON 출력에 포함되고 콘솔에 표시됩니다. CSV 및 Markdown 출력에는 포함되지 않습니다. 예산 책정이나 프로덕션 결정을 위해 비용 계산에 의존하기 전에 항상 각 제공자의 공식 가격 페이지와 대조하여 확인하십시오.
 
 가격은 각 제공자의 1M 토큰당 표준/정가 공개 요금입니다(배치, 우선순위, 오프피크 또는 프로모션 가격이 아님). 입력 크기별로 티어가 나뉘는 모델의 경우 진입/짧은 컨텍스트 티어가 표시되며, 캐시 가격은 캐시 읽기 요금입니다. DashScope/Qwen 비용은 비사고(non-thinking) 요금을 반영합니다(도구가 `enable_thinking=false`를 전송함).
 
