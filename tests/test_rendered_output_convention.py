@@ -12,8 +12,8 @@ than remembered:
     2. No test may hardcode one half of a platform-dependent box glyph. Rich
        renders a Panel with ROUNDED corners (`╭`) on POSIX and substitutes
        SQUARE (`┌`) under legacy Windows. Counting or stripping only one set
-       passes on one platform and fails on the other - which is exactly what
-       turned all four Windows jobs red on 0.1.5.
+       passes on one platform and fails on the other. That turned all four
+       Windows jobs red on 0.1.5.
 
 Both checks parse the test sources, so they cover files that do not exist yet.
 """
