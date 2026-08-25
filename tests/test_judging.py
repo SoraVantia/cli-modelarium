@@ -342,7 +342,7 @@ class TestScoreWithJudge:
 
     async def test_provider_error_captured(self) -> None:
         provider = _FakeJudgeProvider(
-            error=ProviderError("network died sk-proj-leaked123456789abcdef")
+            error=ProviderError("network died sk-proj-NOT_A_REAL_KEY_leaked_00000")
         )
         score = await score_with_judge(
             judge_provider=provider,
