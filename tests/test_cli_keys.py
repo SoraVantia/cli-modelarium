@@ -15,7 +15,7 @@ from cli_modelarium.cli import main as cli_main
 
 class TestKeysDeleteCloudProvider:
     def test_keys_delete_when_stored_prints_removed_green(self) -> None:
-        security.save_key("openai", "sk-proj-test1234567890abcdefghi")
+        security.save_key("openai", "sk-proj-NOT_A_REAL_KEY_test_fixture_00")
 
         runner = CliRunner()
         result = runner.invoke(cli_main, ["keys", "delete", "openai"])
