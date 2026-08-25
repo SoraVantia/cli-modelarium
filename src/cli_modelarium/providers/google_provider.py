@@ -29,6 +29,40 @@ from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChun
 from cli_modelarium.security import redact_secrets
 
 
+def _billable_output_tokens(usage: Any, input_tokens: int) -> int:
+    """Output tokens as Google bills them, thinking included.
+
+    Google is the only provider in this tool that reports reasoning separately:
+    OpenAI, Anthropic and Qwen all fold it into their own output count, so
+    summing here makes Gemini consistent with the rest of the registry rather
+    than making the shared schema Google-shaped. Google's pricing page labels
+    the rate "Output price (including thinking tokens)", so `thoughts_token_count`
+    is billed at the output rate and belongs in the same number.
+
+    Reading only `candidates_token_count`, as this did before, understated
+    every thinking model's cost. Measured 2026-08-20 against gemini-3.6-flash:
+    a two-character prompt returned 9 output tokens and 170 thought tokens, so
+    the reported cost was a twentieth of the billed one. Google thinks by
+    default with no opt-in, so this was live for every user of such a model.
+
+    `total_token_count` is the cross-check. Anything the three known buckets do
+    not account for is still billed, and this errs toward the output rate
+    rather than dropping it - understating a cost is the failure being fixed
+    here, and a silent zero is how it survived.
+    """
+    candidates = getattr(usage, "candidates_token_count", 0) or 0
+    thoughts = getattr(usage, "thoughts_token_count", 0) or 0
+    output_tokens = candidates + thoughts
+
+    total = getattr(usage, "total_token_count", 0) or 0
+    if total:
+        unaccounted = total - input_tokens - output_tokens
+        if unaccounted > 0:
+            output_tokens += unaccounted
+
+    return output_tokens
+
+
 class GoogleProvider(BaseProvider):
     """Provider using the official google-genai SDK for Gemini models."""
 
@@ -98,8 +132,8 @@ class GoogleProvider(BaseProvider):
                 usage = getattr(chunk, "usage_metadata", None)
                 if usage is not None:
                     input_tokens = getattr(usage, "prompt_token_count", 0) or 0
-                    output_tokens = getattr(usage, "candidates_token_count", 0) or 0
                     cached_tokens = getattr(usage, "cached_content_token_count", 0) or 0
+                    output_tokens = _billable_output_tokens(usage, input_tokens)
         except genai_errors.APIError as e:
             self._reraise(e)
 
