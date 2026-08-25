@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cli-modelarium"
-version = "0.1.6"
+version = "0.1.7"
 description = "Compare LLM outputs side by side from the terminal, with statistical significance testing, cost tracking and CI assertions. Eleven cloud providers plus local models."
 readme = "README.md"
 license = { file = "LICENSE" }
