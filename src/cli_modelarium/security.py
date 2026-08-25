@@ -44,7 +44,14 @@ LOCAL_URL_ENV_VAR = "CLI_MODELARIUM_LOCAL_URL"
 KEY_PATTERNS: dict[str, re.Pattern[str]] = {
     "openai": re.compile(r"^sk-(?:proj-)?[A-Za-z0-9_-]{20,}$"),
     "anthropic": re.compile(r"^sk-ant-(?:api03-)?[A-Za-z0-9_-]{20,}$"),
-    "google": re.compile(r"^[A-Za-z0-9_-]{30,}$"),
+    # Google issues Gemini keys in two shapes: the older `AIza...` Standard key
+    # and the `AQ.Ab...` Auth key that replaces it (Standard keys stop being
+    # accepted by the API in September 2026). This was never AIza-specific - it
+    # is a shape floor - and the dot in the Auth prefix was the only character
+    # failing it, so the class gains `.` rather than an `AIza|AQ\.Ab`
+    # alternation whose escaping is easy to get wrong for no added strictness.
+    # The result is the `zai` class below with a stricter 30-char floor.
+    "google": re.compile(r"^[A-Za-z0-9._-]{30,}$"),
     "xai": re.compile(r"^xai-[A-Za-z0-9_-]{20,}$"),
     "deepseek": re.compile(r"^sk-[A-Za-z0-9_-]{20,}$"),
     "mistral": re.compile(r"^[A-Za-z0-9]{20,}$"),
