@@ -52,7 +52,7 @@ def _make_provider(
         return _FakeClient(completions)
 
     monkeypatch.setattr("cli_modelarium.providers.openai_provider.AsyncOpenAI", fake_async_openai)
-    provider = DeepSeekProvider(api_key="sk-test1234567890abcdefghi")
+    provider = DeepSeekProvider(api_key="sk-NOT_A_REAL_KEY_test_fixture_0000")
     return provider, completions
 
 
