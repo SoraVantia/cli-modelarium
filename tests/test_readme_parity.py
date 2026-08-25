@@ -36,7 +36,7 @@ from pathlib import Path
 
 import pytest
 
-from cli_modelarium.models_registry import MODEL_GROUPS, all_known_providers
+from cli_modelarium.models_registry import DYNAMIC_GROUPS, MODEL_GROUPS, all_known_providers
 from cli_modelarium.pricing import PRICING
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -101,14 +101,41 @@ def _bullets(text: str, heading_fragment: str) -> list[str]:
     return out
 
 
-def _table_rows(text: str, header_fragment: str) -> list[list[str]]:
-    """Body rows of the first pipe table whose header contains a fragment."""
+# A markdown table's separator row: pipes, dashes, optional alignment colons.
+# Body rows always carry letters, so this cannot match one by accident.
+_SEPARATOR_ROW = re.compile(r"^\|[\s:|-]+\|$")
+
+
+def _table_rows(text: str, cell_fragment: str) -> list[list[str]]:
+    """Body rows of the pipe table containing a fragment, wherever it appears.
+
+    The fragment is matched against ANY line of the table, header or body, and
+    the table's start is then found by walking back to the separator row. The
+    obvious alternative - anchor on a header word - is not available here:
+    every header is translated (`Group` is `Gruppe`, `Grupo`, `Groupe`,
+    `Gruppo`, `グループ`, `그룹`, `组`), so the only translation-stable anchors
+    in these files are the backticked identifiers in the body cells.
+
+    This function previously took `start + 2` from the match "to skip header
+    and separator", which is correct only when the match IS the header. Its one
+    caller passes a body fragment, so it silently returned the table minus its
+    first two rows: `all-premium`/`all-flagship` and `all-budget` were compared
+    against MODEL_GROUPS in none of the nine files. Anchoring on the separator
+    removes the assumption rather than re-tuning the offset under it.
+    """
     lines = text.split("\n")
-    start = next(
-        i for i, line in enumerate(lines) if line.startswith("|") and header_fragment in line
+    match = next(
+        (i for i, line in enumerate(lines) if line.startswith("|") and cell_fragment in line),
+        None,
+    )
+    assert match is not None, f"no pipe-table line contains {cell_fragment!r}"
+    separator = next((i for i in range(match, -1, -1) if _SEPARATOR_ROW.match(lines[i])), None)
+    assert separator is not None, (
+        f"{cell_fragment!r} matched line {match} but no separator row precedes it - "
+        f"the fragment is not inside a markdown table."
     )
     rows: list[list[str]] = []
-    for line in lines[start + 2 :]:  # skip header and separator
+    for line in lines[separator + 1 :]:
         if not line.startswith("|"):
             break
         rows.append([c.strip() for c in line.strip().strip("|").split("|")])
@@ -119,6 +146,11 @@ def _table_rows(text: str, header_fragment: str) -> list[list[str]]:
 
 CLOUD_PROVIDER_COUNT = len([p for p in all_known_providers() if p != "local"])
 TEMPERATURE_OMITTED = {m for m, e in PRICING.items() if e.get("rejects_sampling_params")}
+# Groups the static table must document, one alias per cell. Derived rather
+# than a literal count: `all` and `all-local` resolve at runtime and have no
+# row, and `all-premium`/`all-flagship` share one row while being two keys, so
+# neither `len(MODEL_GROUPS)` nor a hardcoded row count states the real rule.
+STATIC_GROUPS = set(MODEL_GROUPS) - DYNAMIC_GROUPS
 
 # Every date the READMEs state. They are deliberately different from each
 # other: pricing was re-verified after the rate limits were, Z.AI's rows were
@@ -210,15 +242,29 @@ class TestStaticGroupTables:
 
     @pytest.mark.parametrize("name", ALL_READMES)
     def test_group_membership_matches_registry(self, name: str) -> None:
-        rows = _table_rows(_read(name), "`all-premium`")
-        assert rows, f"{name}: no static group table found"
-        for row in rows:
+        documented: dict[str, list[str]] = {}
+        for row in _table_rows(_read(name), "`all-premium`"):
             # `all-premium` / `all-flagship` documents two aliases in one cell.
-            key = row[0].split("/")[0].strip().strip("`")
-            documented = [m.strip() for m in row[1].split(",")]
-            assert MODEL_GROUPS[key] == documented, (
-                f"{name} group {key!r} disagrees with MODEL_GROUPS. "
-                f"README: {documented}. Registry: {MODEL_GROUPS[key]}."
+            # Both are real MODEL_GROUPS keys, so both are checked - reading
+            # only the first left `all-flagship` unverified.
+            members = [m.strip() for m in row[1].split(",")]
+            for alias in (a.strip().strip("`") for a in row[0].split("/")):
+                documented[alias] = members
+
+        # Coverage before contents: a row silently dropped from the table, or a
+        # group added to MODEL_GROUPS without a row, has to fail here. The old
+        # `assert rows` only checked non-emptiness, which stayed true while two
+        # of the five rows were being skipped.
+        assert set(documented) == STATIC_GROUPS, (
+            f"{name} documents groups {sorted(documented)}; the registry's static groups are "
+            f"{sorted(STATIC_GROUPS)}. Missing: {sorted(STATIC_GROUPS - set(documented))}. "
+            f"Extra: {sorted(set(documented) - STATIC_GROUPS)}."
+        )
+
+        for group, members in documented.items():
+            assert MODEL_GROUPS[group] == members, (
+                f"{name} group {group!r} disagrees with MODEL_GROUPS. "
+                f"README: {members}. Registry: {MODEL_GROUPS[group]}."
             )
 
 
