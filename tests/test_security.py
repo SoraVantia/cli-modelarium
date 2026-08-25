@@ -25,21 +25,21 @@ class TestValidateKey:
     @pytest.mark.parametrize(
         "provider, key",
         [
-            ("openai", "sk-proj-abc123XYZ456DEF789ghi0jklmnop"),
-            ("openai", "sk-abc123XYZ456DEF789ghi0jklmnop"),
-            ("anthropic", "sk-ant-api03-abc123XYZ456DEF789ghi"),
-            ("anthropic", "sk-ant-abc123XYZ456DEF789ghi"),
-            ("xai", "xai-abc123XYZ456DEF789ghi"),
-            ("groq", "gsk_abc123XYZ456DEF789ghi"),
-            ("openrouter", "sk-or-abc123XYZ456DEF789ghi"),
-            ("deepseek", "sk-abc123XYZ456DEF789ghi"),
-            ("mistral", "abc123XYZ456DEF789ghi0"),
+            ("openai", "sk-proj-NOT_A_REAL_KEY_test_fixture_00"),
+            ("openai", "sk-NOT_A_REAL_KEY_test_fixture_0000"),
+            ("anthropic", "sk-ant-api03-NOT_A_REAL_KEY_test_fixture"),
+            ("anthropic", "sk-ant-NOT_A_REAL_KEY_test_fixture_0"),
+            ("xai", "xai-NOT_A_REAL_KEY_test_fixture_00"),
+            ("groq", "gsk_NOT_A_REAL_KEY_test_fixture_00"),
+            ("openrouter", "sk-or-NOT_A_REAL_KEY_test_fixture_0"),
+            ("deepseek", "sk-NOT_A_REAL_KEY_test_fixture_0000"),
+            ("mistral", "NOTAREALKEYtestfixture00"),
             ("dashscope", "sk-xxxxxxxxxxxxxxxxxxxx"),
             # Google issues two shapes and both must pass. The Auth fixture
             # carries a hyphen as well as the dot: the hyphen was already in the
             # class and is not what the widening turned on, but it is what a
             # future rewrite to an `AIza|AQ\.Ab` alternation would break on.
-            ("google", "AIzaSyD-1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTu"),
+            ("google", "AIzaSyNOT_A_REAL_KEY-test_fixture_000000"),
             ("google", "AQ.AbSyntheticTestKey-not_a_real_credential01"),
         ],
     )
@@ -81,7 +81,7 @@ class TestGoogleKeyFormat:
     the new one does.
     """
 
-    AIZA = "AIzaSyD-1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTu"
+    AIZA = "AIzaSyNOT_A_REAL_KEY-test_fixture_000000"
     AUTH = "AQ.AbSyntheticTestKey-not_a_real_credential01"
 
     def test_both_shapes_are_accepted(self) -> None:
@@ -124,12 +124,12 @@ class TestRedactSecrets:
     @pytest.mark.parametrize(
         "secret",
         [
-            "sk-proj-abc123XYZ456DEF789ghijklmnop",
-            "sk-ant-api03-abc123XYZ456DEF789ghi",
-            "sk-or-abc123XYZ456DEF789ghi",
-            "xai-abc123XYZ456DEF789ghi",
-            "gsk_abc123XYZ456DEF789ghi",
-            "AIzaSyABC123def456GHI789jkl012MNO345pqr678",
+            "sk-proj-NOT_A_REAL_KEY_test_fixture_00",
+            "sk-ant-api03-NOT_A_REAL_KEY_test_fixture",
+            "sk-or-NOT_A_REAL_KEY_test_fixture_0",
+            "xai-NOT_A_REAL_KEY_test_fixture_00",
+            "gsk_NOT_A_REAL_KEY_test_fixture_00",
+            "AIzaSyNOT_A_REAL_KEY_test_fixture_0000000",
         ],
     )
     def test_each_provider_key_redacted(self, secret: str) -> None:
@@ -144,8 +144,8 @@ class TestRedactSecrets:
         assert "REDACTED" in redacted
 
     def test_x_api_key_header(self) -> None:
-        redacted = security.redact_secrets("x-api-key: sk-someValue1234567890")
-        assert "someValue" not in redacted
+        redacted = security.redact_secrets("x-api-key: sk-NOT_A_REAL_KEY_header_00000")
+        assert "NOT_A_REAL" not in redacted
 
     def test_api_key_in_query_string(self) -> None:
         redacted = security.redact_secrets(
@@ -165,17 +165,17 @@ class TestRedactSecrets:
 
     def test_specific_prefixes_not_swallowed_by_generic_sk(self) -> None:
         # sk-ant-* should land on the anthropic placeholder, not the generic one.
-        redacted = security.redact_secrets("sk-ant-api03-abc123XYZ456DEF789ghi")
+        redacted = security.redact_secrets("sk-ant-api03-NOT_A_REAL_KEY_test_fixture")
         assert "sk-ant-***REDACTED***" in redacted
 
-        redacted = security.redact_secrets("sk-or-abc123XYZ456DEF789ghi")
+        redacted = security.redact_secrets("sk-or-NOT_A_REAL_KEY_test_fixture_0")
         assert "sk-or-***REDACTED***" in redacted
 
     def test_non_string_input(self) -> None:
         # Defensive: object that stringifies to something with a key.
         class Obj:
             def __str__(self) -> str:
-                return "key=sk-proj-abc123XYZ456DEF789ghi"
+                return "key=sk-proj-NOT_A_REAL_KEY_test_fixture_00"
 
         redacted = security.redact_secrets(Obj())  # type: ignore[arg-type]
         assert "abc123" not in redacted
@@ -189,7 +189,7 @@ class TestNvapiRedaction:
     column of CSV and JSON output, which CI commonly uploads as an artifact.
     """
 
-    NVAPI = "nvapi-abcdefghij1234567890ABCDEFGHIJ1234567890"
+    NVAPI = "nvapi-NOT_A_REAL_KEY_test_fixture_00000000"
 
     def test_bare_token_in_json_body(self) -> None:
         redacted = security.redact_secrets(f'{{"error":"invalid key {self.NVAPI}"}}')
@@ -229,14 +229,14 @@ class TestRedactionRegressionPins:
     @pytest.mark.parametrize(
         "secret,expected",
         [
-            ("sk-proj-abc123XYZ456DEF789ghi", "sk-proj-***REDACTED***"),
-            ("sk-ant-api03-abc123XYZ456DEF789ghi", "sk-ant-***REDACTED***"),
-            ("sk-or-abc123XYZ456DEF789ghi", "sk-or-***REDACTED***"),
-            ("xai-abc123XYZ456DEF789ghi", "xai-***REDACTED***"),
-            ("gsk_abc123XYZ456DEF789ghi", "gsk_***REDACTED***"),
-            ("sk-abc123XYZ456DEF789ghi", "sk-***REDACTED***"),
-            ("AIzaSyABC123def456GHI789jkl012MNO345pqr678", "AIza***REDACTED***"),
-            ("nvapi-abc123XYZ456DEF789ghi", "nvapi-***REDACTED***"),
+            ("sk-proj-NOT_A_REAL_KEY_test_fixture_00", "sk-proj-***REDACTED***"),
+            ("sk-ant-api03-NOT_A_REAL_KEY_test_fixture", "sk-ant-***REDACTED***"),
+            ("sk-or-NOT_A_REAL_KEY_test_fixture_0", "sk-or-***REDACTED***"),
+            ("xai-NOT_A_REAL_KEY_test_fixture_00", "xai-***REDACTED***"),
+            ("gsk_NOT_A_REAL_KEY_test_fixture_00", "gsk_***REDACTED***"),
+            ("sk-NOT_A_REAL_KEY_test_fixture_0000", "sk-***REDACTED***"),
+            ("AIzaSyNOT_A_REAL_KEY_test_fixture_0000000", "AIza***REDACTED***"),
+            ("nvapi-NOT_A_REAL_KEY_test_fixture_0", "nvapi-***REDACTED***"),
         ],
     )
     def test_prefix_rule_output_is_exact(self, secret: str, expected: str) -> None:
@@ -247,7 +247,7 @@ class TestRedactionRegressionPins:
             security.redact_secrets("Authorization: Bearer abc123XYZ456DEF789ghi")
             == "Authorization: Bearer ***REDACTED***"
         )
-        assert security.redact_secrets("x-api-key: someValue1234567890") == (
+        assert security.redact_secrets("x-api-key: NOT_A_REAL_KEY_header_0") == (
             "x-api-key: ***REDACTED***"
         )
         assert security.redact_secrets("api_key=abc123XYZdef") == "api_key=***REDACTED***"
@@ -283,9 +283,9 @@ class TestKeyPatternsCoverage:
     @pytest.mark.parametrize(
         "key,valid",
         [
-            ("nvapi-abcdefghij1234567890abcd", True),
+            ("nvapi-NOT_A_REAL_KEY_test_fixture_1", True),
             ("nvapi-short", False),
-            ("sk-proj-abcdefghij1234567890", False),
+            ("sk-proj-NOT_A_REAL_KEY_test_fixture_00", False),
             ("abcdefghij1234567890abcdefgh", False),
         ],
     )
@@ -295,12 +295,12 @@ class TestKeyPatternsCoverage:
 
 class TestKeyringIntegration:
     def test_save_and_load(self) -> None:
-        security.save_key("openai", "sk-proj-test1234567890abcdefghi")
-        assert security.load_key("openai") == "sk-proj-test1234567890abcdefghi"
+        security.save_key("openai", "sk-proj-NOT_A_REAL_KEY_test_fixture_00")
+        assert security.load_key("openai") == "sk-proj-NOT_A_REAL_KEY_test_fixture_00"
 
     def test_save_strips_whitespace(self) -> None:
-        security.save_key("openai", "  sk-proj-test1234567890abcdefghi  \n")
-        assert security.load_key("openai") == "sk-proj-test1234567890abcdefghi"
+        security.save_key("openai", "  sk-proj-NOT_A_REAL_KEY_test_fixture_00  \n")
+        assert security.load_key("openai") == "sk-proj-NOT_A_REAL_KEY_test_fixture_00"
 
     def test_save_invalid_format_raises(self) -> None:
         with pytest.raises(ValueError):
@@ -313,7 +313,7 @@ class TestKeyringIntegration:
         assert security.delete_key("openai") is False
 
     def test_delete_removes_existing(self) -> None:
-        security.save_key("openai", "sk-proj-test1234567890abcdefghi")
+        security.save_key("openai", "sk-proj-NOT_A_REAL_KEY_test_fixture_00")
         assert security.delete_key("openai") is True
         assert security.load_key("openai") is None
 
@@ -326,43 +326,43 @@ class TestKeyringIntegration:
         assert security.load_local_url() is None
 
     def test_env_var_takes_precedence_over_keychain(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        security.save_key("openai", "sk-proj-kerring1234567890abcdefghi")
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-fromenv1234567890abcdefghi")
-        assert security.load_key("openai") == "sk-proj-fromenv1234567890abcdefghi"
+        security.save_key("openai", "sk-proj-NOT_A_REAL_KEY_from_keyring_0")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-NOT_A_REAL_KEY_from_env_0000")
+        assert security.load_key("openai") == "sk-proj-NOT_A_REAL_KEY_from_env_0000"
 
     def test_env_var_alone(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fromenv1234567890abcdefghi")
-        assert security.load_key("anthropic") == "sk-ant-fromenv1234567890abcdefghi"
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-NOT_A_REAL_KEY_from_env_0000")
+        assert security.load_key("anthropic") == "sk-ant-NOT_A_REAL_KEY_from_env_0000"
 
     def test_env_var_is_stripped(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("OPENAI_API_KEY", "  sk-proj-padded1234567890abcdefghi  ")
-        assert security.load_key("openai") == "sk-proj-padded1234567890abcdefghi"
+        monkeypatch.setenv("OPENAI_API_KEY", "  sk-proj-NOT_A_REAL_KEY_padded_00000  ")
+        assert security.load_key("openai") == "sk-proj-NOT_A_REAL_KEY_padded_00000"
 
     def test_gemini_api_key_alias_for_google(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # GEMINI_API_KEY is accepted as a fallback for the google provider.
-        monkeypatch.setenv("GEMINI_API_KEY", "AIzaGemini1234567890abcdef1234567890")
-        assert security.load_key("google") == "AIzaGemini1234567890abcdef1234567890"
+        monkeypatch.setenv("GEMINI_API_KEY", "AIzaGemini_NOT_A_REAL_KEY_test_fixture_0")
+        assert security.load_key("google") == "AIzaGemini_NOT_A_REAL_KEY_test_fixture_0"
 
     def test_google_api_key_takes_precedence_over_gemini(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GOOGLE_API_KEY", "AIzaGoogle1234567890abcdef1234567890")
-        monkeypatch.setenv("GEMINI_API_KEY", "AIzaGemini1234567890abcdef1234567890")
-        assert security.load_key("google") == "AIzaGoogle1234567890abcdef1234567890"
+        monkeypatch.setenv("GOOGLE_API_KEY", "AIzaGoogle_NOT_A_REAL_KEY_test_fixture_0")
+        monkeypatch.setenv("GEMINI_API_KEY", "AIzaGemini_NOT_A_REAL_KEY_test_fixture_0")
+        assert security.load_key("google") == "AIzaGoogle_NOT_A_REAL_KEY_test_fixture_0"
 
     def test_gemini_alias_does_not_leak_to_other_providers(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # The alias is google-only; GEMINI_API_KEY must not satisfy openai.
-        monkeypatch.setenv("GEMINI_API_KEY", "AIzaGemini1234567890abcdef1234567890")
+        monkeypatch.setenv("GEMINI_API_KEY", "AIzaGemini_NOT_A_REAL_KEY_test_fixture_0")
         assert security.load_key("openai") is None
 
     def test_is_key_configured_via_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("XAI_API_KEY", "xai-test1234567890abcdefghi")
+        monkeypatch.setenv("XAI_API_KEY", "xai-NOT_A_REAL_KEY_test_fixture_00")
         assert security.is_key_configured("xai")
 
     def test_is_key_configured_via_keychain(self) -> None:
-        security.save_key("groq", "gsk_test1234567890abcdefghi")
+        security.save_key("groq", "gsk_NOT_A_REAL_KEY_test_fixture_00")
         assert security.is_key_configured("groq")
 
     def test_is_key_configured_returns_false_when_missing(self) -> None:
