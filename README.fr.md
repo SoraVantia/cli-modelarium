@@ -197,6 +197,12 @@ cli-modelarium "Explain recursion in one paragraph" \
   --judge-criteria "accuracy,clarity,brevity"
 ```
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-judge-demo.gif" alt="Démonstration de cli-modelarium dans le terminal : un juge LLM note deux modèles ; un tableau comparatif affiche un score par modèle, suivi du raisonnement écrit du juge." width="848">
+</p>
+
+**Note sur la démo :** les scores et les coûts proviennent d'une seule exécution au moment de l'enregistrement. Les scores du juge sont un signal, pas une vérité de référence, et ne se reproduisent pas exactement d'une exécution ou d'une version de modèle à l'autre. Les tarifs changent ; vérifiez-les auprès du fournisseur avant de vous fier à un chiffre.
+
 ### Détecter les hallucinations contre des faits connus
 
 ```bash
@@ -260,7 +266,7 @@ fi
 
 `--output-format json` est indispensable : la sortie par défaut ne comporte aucun champ d'erreur exploitable par un script. Notez que les échecs survenant *avant* tout appel de modèle (clé manquante, modèle inconnu, fichier de lot incorrect) ne produisent aucun JSON ; le message affiché en console est alors le seul signal.
 
-**Note de confidentialité :** tous les formats de sortie - JSON, CSV et Markdown - contiennent le prompt complet et la réponse complète du modèle pour chaque résultat, ainsi que tout message d'erreur du fournisseur. Considérez tout fichier de sortie comme sensible avant de le committer ou de le publier comme artefact de CI public.
+**Note de confidentialité :** tous les formats de sortie - JSON, CSV et Markdown - contiennent le prompt complet et la réponse complète du modèle pour chaque résultat, ainsi que tout message d'erreur du fournisseur. JSON contient en outre le texte de raisonnement de chaque juge ; `--include-reasoning` ne contrôle que l'affichage console, pas le fichier, et CSV et Markdown ne le contiennent pas. Considérez tout fichier de sortie comme sensible avant de le committer ou de le publier comme artefact de CI public.
 
 ## Configuration
 
@@ -339,7 +345,7 @@ Au lieu d'énumérer des identifiants de modèles, `--models` accepte un raccour
 
 | Groupe | Modèles |
 |-------|--------|
-| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
+| `all-premium` / `all-flagship` | gpt-5.6-sol, claude-opus-5, gemini-3.1-pro-preview, grok-4.6, deepseek-v4-pro, mistral-large-latest, qwen3.8-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
 | `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
@@ -368,7 +374,7 @@ Pour les modèles locaux, le même SDK Python OpenAI est utilisé avec une `base
 
 ### Données de tarification
 
-Toutes les tarifications intégrées dans Cli Modelarium ont été vérifiées depuis la documentation officielle des fournisseurs le **29 juillet 2026**. Les tarifs Z.AI/GLM constituent la seule exception : ils portent une date de vérification antérieure, le **22 juin 2026**, n'ont pas fait partie de la dernière passe, et leurs entrées sont inchangées depuis. Les tarifs des LLM changent fréquemment (parfois mensuellement). La date `pricing_as_of` figure dans la sortie JSON et s'affiche dans la console ; les sorties CSV et Markdown ne la contiennent pas. Vérifiez toujours par rapport à la page officielle de tarification de chaque fournisseur avant de vous fier aux calculs de coûts pour la budgétisation ou les décisions de production.
+La plupart des tarifications intégrées dans Cli Modelarium ont été vérifiées depuis la documentation officielle des fournisseurs le **29 juillet 2026**. Certaines entrées portent leur propre date de vérification, indiquée à côté de chacune dans le registre ; les tarifs Z.AI/GLM sont les plus anciens, du **22 juin 2026**. Les tarifs des LLM changent fréquemment (parfois mensuellement). La date `pricing_as_of` figure dans la sortie JSON et s'affiche dans la console ; les sorties CSV et Markdown ne la contiennent pas. Vérifiez toujours par rapport à la page officielle de tarification de chaque fournisseur avant de vous fier aux calculs de coûts pour la budgétisation ou les décisions de production.
 
 Les prix correspondent au tarif public standard/catalogue de chaque fournisseur par tranche de 1M de tokens (pas la tarification par lots, prioritaire, hors pointe ou promotionnelle) ; pour les modèles à paliers selon la taille d'entrée, le palier d'entrée/contexte court est affiché, et la tarification en cache correspond au tarif de lecture du cache. Les coûts de DashScope/Qwen reflètent les tarifs sans raisonnement (l'outil envoie `enable_thinking=false`).
 
