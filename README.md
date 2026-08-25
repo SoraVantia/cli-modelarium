@@ -314,6 +314,12 @@ cli-modelarium "Explain recursion in one paragraph" \
   --judge-criteria "accuracy,clarity,brevity"
 ```
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/SoraVantia/cli-modelarium/main/docs/assets/cli-modelarium-judge-demo.gif" alt="Terminal demo of cli-modelarium scoring two models with an LLM judge: a comparison table reports a score per model, then the judge's written reasoning appears beneath each answer, naming what it rewarded and what it marked down." width="848">
+</p>
+
+**Demo note:** Scores and cost figures are from one run at recording time. Judge scores are signal, not ground truth, and will not reproduce exactly across runs or model versions. Pricing changes; verify against the provider before relying on any figure.
+
 ### Detect hallucinations against known facts
 
 ```bash
@@ -377,7 +383,7 @@ fi
 
 `--output-format json` is required - the default output carries no machine-readable error field. Note that failures which happen *before* any model is called (a missing key, an unknown model, a bad batch file) produce no JSON at all; the console message is the only signal in those cases.
 
-**Privacy note:** Every output format - JSON, CSV and Markdown - embeds the full prompt and the full model response for every result, alongside any provider error message. Treat any output file as sensitive before committing it or uploading it as a public CI artifact.
+**Privacy note:** Every output format - JSON, CSV and Markdown - embeds the full prompt and the full model response for every result, alongside any provider error message. JSON additionally embeds each judge's reasoning text; `--include-reasoning` gates only the console display, not the file, and CSV and Markdown do not carry it. Treat any output file as sensitive before committing it or uploading it as a public CI artifact.
 
 ### More examples
 
@@ -493,7 +499,7 @@ Instead of listing model IDs, `--models` accepts a group shortcut. Static groups
 
 | Group | Models |
 |-------|--------|
-| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
+| `all-premium` / `all-flagship` | gpt-5.6-sol, claude-opus-5, gemini-3.1-pro-preview, grok-4.6, deepseek-v4-pro, mistral-large-latest, qwen3.8-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
 | `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
@@ -522,7 +528,7 @@ For local models, the same OpenAI Python SDK is used with a custom `base_url`, s
 
 ### Pricing data
 
-All pricing built into Cli Modelarium was verified from official provider documentation on **July 29, 2026**. The Z.AI/GLM prices are the one exception: they carry an earlier **June 22, 2026** verification date, were not part of the most recent pass, and their entries are unchanged since then. LLM pricing changes frequently (sometimes monthly). The `pricing_as_of` date is carried in JSON output and shown in the console; CSV and Markdown output do not include it. Always verify against each provider's official pricing page before relying on cost calculations for budgeting or production decisions.
+Most pricing built into Cli Modelarium was verified from official provider documentation on **July 29, 2026**. Some entries carry their own verification date, noted beside each one in the registry; the Z.AI/GLM prices are the oldest, at **June 22, 2026**. LLM pricing changes frequently (sometimes monthly). The `pricing_as_of` date is carried in JSON output and shown in the console; CSV and Markdown output do not include it. Always verify against each provider's official pricing page before relying on cost calculations for budgeting or production decisions.
 
 Prices are each provider's standard/list public rate per 1M tokens (not batch, priority, off-peak, or promotional pricing); for input-size-tiered models the entry/short-context tier is shown, and cached pricing is the cache-read rate. DashScope/Qwen costs reflect non-thinking rates (the tool sends `enable_thinking=false`).
 
