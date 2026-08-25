@@ -1,15 +1,10 @@
 """LLM-as-a-judge scoring.
 
-Three concerns:
-
-    1. Prompt building - `build_judge_prompt` formats a judge template with
-       criteria, the original user prompt, and the response to evaluate.
-    2. Response parsing - `parse_judge_response` is forgiving about wrapping
-       (markdown fences, leading/trailing text) and returns a structured
-       result with parse_error set when JSON couldn't be extracted.
-    3. Orchestration - `run_judging` runs every (state, judge) pairing in
-       parallel under per-judge-provider semaphores, with self-evaluation
-       auto-skip and aggregation across the panel.
+`build_judge_prompt` fills a judge template. `parse_judge_response` is forgiving
+about wrapping (markdown fences, leading/trailing text) and sets parse_error
+when JSON couldn't be extracted. `run_judging` runs every (state, judge) pairing
+in parallel under per-judge-provider semaphores, with self-evaluation auto-skip
+and aggregation across the panel.
 
 The judge call requests `temperature=0.0` so scoring is deterministic and the
 panel stays comparable across runs. That guarantee is NOT unconditional: a few
@@ -47,11 +42,15 @@ DEFAULT_CRITERIA: tuple[str, ...] = (
 )
 
 # The template is fixed deliberately: judge scores are only comparable
-# across runs that used identical wording, so edits here silently
-# invalidate comparisons against previously recorded results. Pass
-# --judge-template to vary it per run instead. `{criteria}`, `{prompt}`, and
-# `{response}` are the three substitution points. Double `{{` / `}}` escape
-# the JSON braces so str.format doesn't try to interpret them.
+# across runs that used identical wording, so any edit here invalidates
+# comparisons against previously recorded results. A silent edit is the
+# failure mode this comment exists to prevent; the CHANGELOG carries the
+# ones already made. Pass --judge-template to vary it per
+# run instead. `{criteria}`, `{prompt}` and `{response}` are the three
+# substitution points, filled by build_judge_prompt with str.replace,
+# NOT str.format. The JSON example below therefore uses single braces:
+# nothing unescapes `{{`, so the example reaches the judge exactly as
+# written.
 JUDGE_PROMPT_TEMPLATE = """You are evaluating an AI assistant's response. \
 Rate the response on a scale of 1-10 for overall quality based on these criteria:
 
@@ -61,7 +60,7 @@ Original prompt: {prompt}
 Response to evaluate: {response}
 
 Respond with ONLY a JSON object in this exact format:
-{{"score": <1-10 integer>, "reasoning": "<one sentence explanation>"}}
+{"reasoning": "<one sentence explanation>", "score": <1-10 integer>}
 
 Do not include any other text."""
 
