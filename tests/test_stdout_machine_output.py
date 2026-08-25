@@ -94,7 +94,7 @@ def fixed_provider(monkeypatch: pytest.MonkeyPatch) -> _FixedProvider:
     # `_validate_judge_models` reads `is_key_configured` directly rather than
     # going through `_get_provider_instance`, so the judging tests below need a
     # key present for validation to pass.
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-test1234567890abcdefghi")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-NOT_A_REAL_KEY_test_fixture_00")
     return fake
 
 
