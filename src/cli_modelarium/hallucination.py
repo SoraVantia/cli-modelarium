@@ -35,9 +35,11 @@ from cli_modelarium.judging import (
 
 # The full evaluation rubric. `{reference_check}` is substituted with either
 # HALLUCINATION_WITH_FACTS (when facts are provided) or
-# HALLUCINATION_WITHOUT_FACTS. The literal `{"score": ...}` braces in the
-# response-format line do NOT need escaping because we use `.replace()`,
-# not `.format()`.
+# HALLUCINATION_WITHOUT_FACTS. The literal `{"reasoning": ...}` braces in
+# the response-format line do NOT need escaping because we use `.replace()`,
+# not `.format()`. Note the two string literals below split that object: the
+# first owns the opening brace, the second the closing one, so reordering the
+# keys means rewriting both - swapping the lines yields `}` before `{`.
 HALLUCINATION_CRITERIA_BASE = (
     """\
 Evaluate the response for hallucination risk. Check:
@@ -55,8 +57,8 @@ Rate hallucination risk on 1-10:
 
 """
     "Respond ONLY with JSON: "
-    '{"score": <1-10>, "risk_level": "Low" | "Medium" | "High", '
-    '"reasoning": "<one sentence>"}'
+    '{"reasoning": "<one sentence>", "score": <1-10>, '
+    '"risk_level": "Low" | "Medium" | "High"}'
 )
 
 HALLUCINATION_WITH_FACTS = """\
