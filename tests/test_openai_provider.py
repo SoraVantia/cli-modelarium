@@ -60,7 +60,7 @@ def _make_provider(
         return _FakeClient(completions)
 
     monkeypatch.setattr("cli_modelarium.providers.openai_provider.AsyncOpenAI", fake_async_openai)
-    provider = OpenAIProvider(api_key="sk-proj-test1234567890abcdefghi")
+    provider = OpenAIProvider(api_key="sk-proj-NOT_A_REAL_KEY_test_fixture_00")
     return provider, completions
 
 
@@ -217,7 +217,7 @@ def _build_response(status: int, headers: dict[str, str] | None = None) -> httpx
 
 async def test_authentication_error_translated(monkeypatch: pytest.MonkeyPatch) -> None:
     err = openai.AuthenticationError(
-        "invalid key sk-proj-leakedkey1234567890abcdefghi",
+        "invalid key sk-proj-NOT_A_REAL_KEY_leaked_00000",
         response=_build_response(401),
         body=None,
     )
@@ -325,9 +325,9 @@ def test_base_url_forwarded_to_client(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("cli_modelarium.providers.openai_provider.AsyncOpenAI", capture)
 
-    OpenAIProvider(api_key="sk-proj-test1234567890abcdefghi", base_url="https://example.invalid/v1")
+    OpenAIProvider(api_key="sk-proj-NOT_A_REAL_KEY_test_fixture_00", base_url="https://example.invalid/v1")
 
-    assert captured["api_key"] == "sk-proj-test1234567890abcdefghi"
+    assert captured["api_key"] == "sk-proj-NOT_A_REAL_KEY_test_fixture_00"
     assert captured["base_url"] == "https://example.invalid/v1"
 
 
@@ -340,7 +340,7 @@ def test_no_base_url_omitted_from_kwargs(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr("cli_modelarium.providers.openai_provider.AsyncOpenAI", capture)
 
-    OpenAIProvider(api_key="sk-proj-test1234567890abcdefghi")
+    OpenAIProvider(api_key="sk-proj-NOT_A_REAL_KEY_test_fixture_00")
 
     assert "base_url" not in captured
 
