@@ -18,6 +18,8 @@ All notable changes to Cli Modelarium will be documented in this file.
 
 ### Changed
 
+- **Test key fixtures now say `NOT_A_REAL_KEY` in the body.** Prefix and length are unchanged, so every pattern and redaction rule is exercised as before. Secret scanners match on prefix plus length plus a body that looks random; the bodies no longer do. Do not make them look realistic again.
+
 - **The judge is now asked to write its reasoning before its score, so every judge score in a judged run may move - and with it every significance verdict.** `README.md:184-185` states the rule: "The default metric is the judge `score` when judging is on, otherwise `latency_ms`." So this is not a display change. Every p-value, Cohen's d, bootstrap confidence interval and Bonferroni/Holm correction in a judged run is computed over judge scores, and a user who had "significantly better, p=0.03" against 0.1.6 may not have it after upgrading. The same flip is applied to the hallucination preset, ordered reasoning, score, risk_level.
 
   **This is a hypothesis, not a measured result, and it is stated as one.** The mechanism - a model that emits the score first has committed to a verdict before writing the justification for it - is true by construction only for a model that emits its answer directly. It does not hold for one that reasons in a hidden trace before emitting anything, and the twelve models flagged `rejects_sampling_params` are both the likeliest judges in a panel and the likeliest to work that way. No percentage is claimed because none was measured; measuring it needs paired live runs against both templates, which this release does not contain.
