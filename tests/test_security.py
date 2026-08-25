@@ -35,6 +35,12 @@ class TestValidateKey:
             ("deepseek", "sk-abc123XYZ456DEF789ghi"),
             ("mistral", "abc123XYZ456DEF789ghi0"),
             ("dashscope", "sk-xxxxxxxxxxxxxxxxxxxx"),
+            # Google issues two shapes and both must pass. The Auth fixture
+            # carries a hyphen as well as the dot: the hyphen was already in the
+            # class and is not what the widening turned on, but it is what a
+            # future rewrite to an `AIza|AQ\.Ab` alternation would break on.
+            ("google", "AIzaSyD-1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTu"),
+            ("google", "AQ.AbSyntheticTestKey-not_a_real_credential01"),
         ],
     )
     def test_valid_formats(self, provider: str, key: str) -> None:
@@ -49,6 +55,11 @@ class TestValidateKey:
             ("xai", "no-prefix-1234567890abc"),
             ("groq", "gsk-not-underscore-1234567890abc"),
             ("openrouter", "sk-not-or-1234567890abc"),
+            # Google's is a shape floor, not a prefix rule, so the things that
+            # must still fail are length and out-of-class characters.
+            ("google", "a" * 29),
+            ("google", "AQ.Ab has a space in the middle of it 012345"),
+            ("google", "AQ.Ab+slash/and+plus+are+not+base64url+chars0"),
         ],
     )
     def test_invalid_formats(self, provider: str, key: str) -> None:
@@ -58,6 +69,55 @@ class TestValidateKey:
         # Cannot validate what we don't have a pattern for; accept and let the
         # provider reject at API time.
         assert security.validate_key("brand-new-provider", "anything-goes-here-1234")
+
+
+class TestGoogleKeyFormat:
+    """Both Gemini key shapes, and the floor that is the only real constraint.
+
+    This pattern had no coverage in either direction before the `AQ.` widening,
+    which is how it came to reject every key Google now issues without a test
+    noticing. `AIza` keys keep working until Google stops accepting them in
+    September 2026, so the point of these is that BOTH shapes pass, not that
+    the new one does.
+    """
+
+    AIZA = "AIzaSyD-1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTu"
+    AUTH = "AQ.AbSyntheticTestKey-not_a_real_credential01"
+
+    def test_both_shapes_are_accepted(self) -> None:
+        assert security.validate_key("google", self.AIZA)
+        assert security.validate_key("google", self.AUTH)
+
+    def test_the_auth_fixture_carries_a_dot_and_a_hyphen(self) -> None:
+        # The dot is the character the widening turns on; the hyphen was always
+        # in the class. The fixture carries both anyway, because a rewrite to an
+        # `AIza|AQ\.Ab` alternation would admit the dot and could still stop at
+        # the hyphen, and nothing else here would catch that.
+        assert "." in self.AUTH and "-" in self.AUTH
+
+    def test_length_floor_is_thirty(self) -> None:
+        assert not security.validate_key("google", "a" * 29)
+        assert security.validate_key("google", "a" * 30)
+
+    def test_widening_did_not_relax_the_character_class(self) -> None:
+        # Only `.` was added. Anything outside base64url-plus-dot still fails,
+        # so the slot did not become "accept any string of length 30".
+        for bad in ("+", "/", "=", " ", "$", "\t"):
+            assert not security.validate_key("google", "a" * 20 + bad + "a" * 20), bad
+
+    def test_class_matches_zai_with_a_stricter_floor(self) -> None:
+        # The widened class is one already shipped for `zai`; only the floor
+        # differs. Pinned so a future edit to either notices it is copying the
+        # other rather than inventing a shape.
+        def accepted_chars(provider: str) -> set[str]:
+            pattern = security.KEY_PATTERNS[provider]
+            return {
+                chr(c) for c in range(32, 127) if pattern.match("a" * 20 + chr(c) + "a" * 20)
+            }
+
+        assert accepted_chars("google") == accepted_chars("zai")
+        assert not security.validate_key("google", "a" * 29)
+        assert security.validate_key("zai", "a" * 29)
 
 
 class TestRedactSecrets:
