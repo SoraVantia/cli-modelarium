@@ -197,6 +197,12 @@ cli-modelarium "Explain recursion in one paragraph" \
   --judge-criteria "accuracy,clarity,brevity"
 ```
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-judge-demo.gif" alt="Demonstração do cli-modelarium no terminal: um juiz LLM pontua dois modelos; uma tabela comparativa mostra uma pontuação por modelo e abaixo aparece o raciocínio escrito do juiz." width="848">
+</p>
+
+**Nota da demonstração:** as pontuações e os valores de custo são de uma única execução no momento da gravação. As pontuações do juiz são um sinal, não uma verdade absoluta, e não se reproduzem exatamente entre execuções ou versões de modelo. Os preços mudam; verifique com o provedor antes de confiar em qualquer valor.
+
 ### Detecte alucinações contra fatos conhecidos
 
 ```bash
@@ -260,7 +266,7 @@ fi
 
 `--output-format json` é obrigatório: a saída padrão não inclui nenhum campo de erro legível por máquina. Observe que as falhas que ocorrem *antes* de qualquer chamada ao modelo (chave ausente, modelo desconhecido, arquivo de lote incorreto) não produzem JSON algum; nesses casos a mensagem no console é o único sinal.
 
-**Nota de privacidade:** todos os formatos de saída - JSON, CSV e Markdown - incluem o prompt completo e a resposta completa do modelo de cada resultado, junto com quaisquer mensagens de erro do provedor. Trate qualquer arquivo de saída como sensível antes de fazer commit ou enviá-lo como artefato público de CI.
+**Nota de privacidade:** todos os formatos de saída - JSON, CSV e Markdown - incluem o prompt completo e a resposta completa do modelo de cada resultado, junto com quaisquer mensagens de erro do provedor. O JSON inclui ainda o texto de raciocínio de cada juiz; `--include-reasoning` controla apenas a exibição no console, não o arquivo, e CSV e Markdown não o contêm. Trate qualquer arquivo de saída como sensível antes de fazer commit ou enviá-lo como artefato público de CI.
 
 ## Configuração
 
@@ -339,7 +345,7 @@ Em vez de listar IDs de modelos, `--models` aceita um atalho de grupo. Os grupos
 
 | Grupo | Modelos |
 |-------|---------|
-| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
+| `all-premium` / `all-flagship` | gpt-5.6-sol, claude-opus-5, gemini-3.1-pro-preview, grok-4.6, deepseek-v4-pro, mistral-large-latest, qwen3.8-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
 | `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
@@ -368,7 +374,7 @@ Para modelos locais, o mesmo SDK Python da OpenAI é usado com uma `base_url` pe
 
 ### Dados de preço
 
-Todos os preços incorporados ao Cli Modelarium foram verificados a partir da documentação oficial do provedor em **29 de julho de 2026**. Os preços da Z.AI/GLM são a única exceção: eles carregam uma data de verificação anterior, **22 de junho de 2026**, não fizeram parte da passagem mais recente, e suas entradas permanecem inalteradas desde então. Os preços de LLM mudam com frequência (às vezes mensalmente). A data `pricing_as_of` é incluída na saída JSON e exibida no console; a saída CSV e Markdown não a inclui. Sempre verifique com a página oficial de preços de cada provedor antes de confiar em cálculos de custo para orçamento ou decisões de produção.
+A maior parte dos preços incorporados ao Cli Modelarium foi verificada a partir da documentação oficial do provedor em **29 de julho de 2026**. Algumas entradas carregam sua própria data de verificação, anotada ao lado de cada uma no registro; os preços da Z.AI/GLM são os mais antigos, de **22 de junho de 2026**. Os preços de LLM mudam com frequência (às vezes mensalmente). A data `pricing_as_of` é incluída na saída JSON e exibida no console; a saída CSV e Markdown não a inclui. Sempre verifique com a página oficial de preços de cada provedor antes de confiar em cálculos de custo para orçamento ou decisões de produção.
 
 Os preços são a tarifa pública padrão/de tabela de cada provedor por 1M de tokens (não preços em lote, prioritários, fora de pico ou promocionais); para modelos com tiers baseados no tamanho da entrada, é exibido o tier inicial/de contexto curto, e o preço em cache é a tarifa de leitura de cache. Os custos do DashScope/Qwen refletem as tarifas sem raciocínio (a ferramenta envia `enable_thinking=false`).
 
