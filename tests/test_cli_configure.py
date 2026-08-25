@@ -42,16 +42,16 @@ PROVIDERS = [p for p in all_known_providers() if p != "local"]
 
 # Shape-valid keys, one per provider, so a test can configure any subset.
 VALID_KEYS = {
-    "anthropic": "sk-ant-api03-abcdefghij1234567890",
-    "dashscope": "sk-abcdefghij1234567890",
-    "deepseek": "sk-abcdefghij1234567890",
-    "google": "AIzaSyD-1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTu",
-    "groq": "gsk_abcdefghij1234567890",
+    "anthropic": "sk-ant-api03-NOT_A_REAL_KEY_test_fixture",
+    "dashscope": "sk-NOT_A_REAL_KEY_test_fixture_0000",
+    "deepseek": "sk-NOT_A_REAL_KEY_test_fixture_0000",
+    "google": "AIzaSyNOT_A_REAL_KEY-test_fixture_000000",
+    "groq": "gsk_NOT_A_REAL_KEY_test_fixture_00",
     "mistral": "abcdefghij1234567890abcd",
-    "nvidia": "nvapi-abcdefghij1234567890abcd",
-    "openai": "sk-proj-abcdefghij1234567890",
-    "openrouter": "sk-or-abcdefghij1234567890",
-    "xai": "xai-abcdefghij1234567890",
+    "nvidia": "nvapi-NOT_A_REAL_KEY_test_fixture_1",
+    "openai": "sk-proj-NOT_A_REAL_KEY_test_fixture_00",
+    "openrouter": "sk-or-NOT_A_REAL_KEY_test_fixture_0",
+    "xai": "xai-NOT_A_REAL_KEY_test_fixture_00",
     "zai": "abcdefghij1234567890abcd",
 }
 
@@ -403,7 +403,7 @@ class TestRedaction:
     """cli.py's ValueError arm printed whatever the exception carried."""
 
     def test_the_invalid_format_line_is_redacted(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        canary = "sk-ant-api03-CANARYabcdefghij1234567890"
+        canary = "sk-ant-api03-NOT_A_REAL_KEY_canary_0000"
 
         def fake_save(provider: str, key: str) -> None:
             raise ValueError(f"Invalid API key format for {provider}: {canary}")
