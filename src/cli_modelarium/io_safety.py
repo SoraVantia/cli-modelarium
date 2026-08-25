@@ -1,15 +1,10 @@
 """Path safety helpers for user-provided input files.
 
-Used by:
-    * --system-prompt-file
-    * batch input files
+Every command that loads a user file shares this module.
 
-Security model
-==============
-
-This module does NOT block path traversal (`../foo`, `/etc/passwd`, etc.).
-The user explicitly typed the path on their CLI; we trust their intent.
-What we DO protect against:
+It does NOT block path traversal (`../foo`, `/etc/passwd`, etc.). The user
+explicitly typed the path on their CLI; we trust their intent. What we DO
+protect against:
 
     * Reading directories, special devices, or sockets by accident.
     * Loading multi-gigabyte files that would OOM the process.
@@ -17,9 +12,8 @@ What we DO protect against:
       `utf-8-sig` so BOMs are tolerated but mismatched encodings surface as
       a clear UnicodeDecodeError rather than producing mojibake downstream.
 
-If you ever want to restrict paths (e.g. a "must be inside repo root" check
-for batch mode CI workflows), add it on top - don't bake it in here, because
-this module is shared by every command that loads a user file.
+Any path restriction (e.g. a "must be inside repo root" check) belongs on top
+of this module rather than inside it, for the same reason.
 """
 
 from __future__ import annotations
