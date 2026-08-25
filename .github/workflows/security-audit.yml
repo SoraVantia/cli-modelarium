@@ -1,0 +1,49 @@
+name: Security audit
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"      # Mondays, 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build the wheel
+        run: |
+          pip install build
+          python -m build --outdir dist
+
+      - name: Resolve the user tree
+        run: |
+          python -m venv /tmp/user
+          /tmp/user/bin/pip install "dist/"*.whl
+          /tmp/user/bin/pip freeze > user.txt
+
+      - name: Audit
+        id: audit
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pip install pip-audit
+          pip-audit --vulnerability-service osv -r user.txt | tee audit.txt
+          test -s audit.txt
+
+      - name: Open an issue if anything was found
+        if: steps.audit.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "pip-audit: advisories found $(date -u +%Y-%m-%d)" \
+            --body "$(printf '```\n%s\n```' "$(cat audit.txt)")"
