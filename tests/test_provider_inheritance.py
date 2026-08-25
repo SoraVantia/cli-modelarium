@@ -62,9 +62,9 @@ def test_base_url_forwarded_to_async_openai(
 
     monkeypatch.setattr("cli_modelarium.providers.openai_provider.AsyncOpenAI", capture)
 
-    cls(api_key="sk-test-1234567890abcdefghi")
+    cls(api_key="sk-NOT_A_REAL_KEY_test_fixture_0000")
 
-    assert captured["api_key"] == "sk-test-1234567890abcdefghi"
+    assert captured["api_key"] == "sk-NOT_A_REAL_KEY_test_fixture_0000"
     assert captured["base_url"] == expected_url
 
 
@@ -78,7 +78,7 @@ def test_openrouter_sends_required_headers(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr("cli_modelarium.providers.openai_provider.AsyncOpenAI", capture)
 
-    OpenRouterProvider(api_key="sk-or-test-1234567890abcdefghi")
+    OpenRouterProvider(api_key="sk-or-NOT_A_REAL_KEY_test_fixture_0")
 
     headers = captured["default_headers"]
     assert headers["HTTP-Referer"] == "https://github.com/SoraVantia/cli-modelarium"
@@ -98,7 +98,7 @@ def test_non_openrouter_subclasses_do_not_send_default_headers(
 
     monkeypatch.setattr("cli_modelarium.providers.openai_provider.AsyncOpenAI", capture)
 
-    cls(api_key="sk-test-1234567890abcdefghi")
+    cls(api_key="sk-NOT_A_REAL_KEY_test_fixture_0000")
 
     assert "default_headers" not in captured
 
@@ -129,6 +129,6 @@ def test_subclass_can_use_transform_model_hook(monkeypatch: pytest.MonkeyPatch) 
         return object()
 
     monkeypatch.setattr("cli_modelarium.providers.openai_provider.AsyncOpenAI", capture)
-    p = Rewriter(api_key="sk-test-1234567890abcdefghi")
+    p = Rewriter(api_key="sk-NOT_A_REAL_KEY_test_fixture_0000")
     assert p._transform_model("prefix/foo") == "foo"
     assert p._transform_model("plain") == "plain"
