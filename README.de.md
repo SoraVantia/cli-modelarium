@@ -197,6 +197,12 @@ cli-modelarium "Explain recursion in one paragraph" \
   --judge-criteria "accuracy,clarity,brevity"
 ```
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-judge-demo.gif" alt="Terminal-Demo von cli-modelarium: Zwei Modelle werden von einem LLM-Judge bewertet; eine Vergleichstabelle zeigt eine Punktzahl pro Modell, darunter erscheint die schriftliche Begründung des Judges." width="848">
+</p>
+
+**Demo-Hinweis:** Punktzahlen und Kostenangaben stammen aus einem einzelnen Lauf zum Aufnahmezeitpunkt. Judge-Punktzahlen sind ein Signal, keine Grundwahrheit, und reproduzieren sich weder über Läufe noch über Modellversionen exakt. Preise ändern sich; überprüfen Sie sie beim Anbieter, bevor Sie sich auf eine Angabe verlassen.
+
 ### Halluzinationen gegen bekannte Fakten erkennen
 
 ```bash
@@ -260,7 +266,7 @@ fi
 
 `--output-format json` ist erforderlich - die Standardausgabe enthält kein maschinenlesbares Fehlerfeld. Beachten Sie: Fehler, die *vor* dem ersten Modellaufruf auftreten (fehlender Schlüssel, unbekanntes Modell, fehlerhafte Batch-Datei), erzeugen überhaupt kein JSON; dort ist die Konsolenmeldung das einzige Signal.
 
-**Datenschutzhinweis:** Jedes Ausgabeformat - JSON, CSV und Markdown - enthält den vollständigen Prompt und die vollständige Modellantwort jedes Ergebnisses sowie eventuelle Provider-Fehlermeldungen. Behandeln Sie jede Ausgabedatei als sensibel, bevor Sie sie committen oder als öffentliches CI-Artefakt hochladen.
+**Datenschutzhinweis:** Jedes Ausgabeformat - JSON, CSV und Markdown - enthält den vollständigen Prompt und die vollständige Modellantwort jedes Ergebnisses sowie eventuelle Provider-Fehlermeldungen. JSON enthält zusätzlich den Begründungstext jedes Judge-Modells; `--include-reasoning` steuert nur die Konsolenanzeige, nicht die Datei, und CSV und Markdown enthalten ihn nicht. Behandeln Sie jede Ausgabedatei als sensibel, bevor Sie sie committen oder als öffentliches CI-Artefakt hochladen.
 
 ## Konfiguration
 
@@ -339,7 +345,7 @@ Anstatt Modell-IDs aufzulisten, akzeptiert `--models` ein Gruppenkürzel. Statis
 
 | Gruppe | Modelle |
 |-------|--------|
-| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
+| `all-premium` / `all-flagship` | gpt-5.6-sol, claude-opus-5, gemini-3.1-pro-preview, grok-4.6, deepseek-v4-pro, mistral-large-latest, qwen3.8-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
 | `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
@@ -368,7 +374,7 @@ Für lokale Modelle wird dasselbe OpenAI Python SDK mit einer benutzerdefinierte
 
 ### Preisdaten
 
-Alle in Cli Modelarium integrierten Preise wurden am **29. Juli 2026** aus der offiziellen Anbieterdokumentation überprüft. Die Z.AI/GLM-Preise sind die einzige Ausnahme: Sie tragen ein früheres Überprüfungsdatum vom **22. Juni 2026**, waren nicht Teil des letzten Durchgangs, und ihre Einträge sind seitdem unverändert. LLM-Preise ändern sich häufig (manchmal monatlich). Das `pricing_as_of`-Datum ist in der JSON-Ausgabe enthalten und wird in der Konsole angezeigt; die CSV- und Markdown-Ausgabe enthält es nicht. Überprüfen Sie immer die offizielle Preisseite jedes Anbieters, bevor Sie sich für Budgetierung oder Produktionsentscheidungen auf Kostenberechnungen verlassen.
+Die meisten in Cli Modelarium integrierten Preise wurden am **29. Juli 2026** aus der offiziellen Anbieterdokumentation überprüft. Einige Einträge tragen ein eigenes Überprüfungsdatum, das jeweils daneben in der Registry vermerkt ist; die Z.AI/GLM-Preise sind die ältesten, vom **22. Juni 2026**. LLM-Preise ändern sich häufig (manchmal monatlich). Das `pricing_as_of`-Datum ist in der JSON-Ausgabe enthalten und wird in der Konsole angezeigt; die CSV- und Markdown-Ausgabe enthält es nicht. Überprüfen Sie immer die offizielle Preisseite jedes Anbieters, bevor Sie sich für Budgetierung oder Produktionsentscheidungen auf Kostenberechnungen verlassen.
 
 Die Preise sind der jeweilige Standard-/Listenpreis jedes Anbieters pro 1 Mio. Tokens (nicht Batch-, Priority-, Off-Peak- oder Aktionspreise); bei Modellen mit nach Eingabegröße gestaffelten Preisen wird die Einstiegs-/Kurzkontext-Stufe angezeigt, und der Cache-Preis entspricht dem Cache-Read-Tarif. Die Kosten für DashScope/Qwen spiegeln die Nicht-Thinking-Tarife wider (das Tool sendet `enable_thinking=false`).
 
