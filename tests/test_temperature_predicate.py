@@ -103,8 +103,8 @@ class ContractCheckingProvider(OpenAIProvider):
     """A fake that enforces the real API contract locally.
 
     Every other fake in this suite accepts **kwargs and never validates
-    model-versus-parameter compatibility, which is exactly why nine models
-    could be completely uncallable against a green suite. This one raises a
+    model-versus-parameter compatibility. Nine models were completely
+    uncallable against a green suite. This one raises a
     simulated 400 when temperature reaches a model that rejects it, turning an
     external API fact into a local invariant.
 
@@ -679,11 +679,11 @@ class TestSweepWarning:
         # Group expansion runs before the warning, so `all-premium` has already
         # become concrete ids. This is the case the warning matters most for.
         expanded = MODEL_GROUPS["all-premium"]
-        assert "gpt-5.5" in expanded and "claude-opus-4-8" in expanded
+        assert "gpt-5.6-sol" in expanded and "claude-opus-5" in expanded
         cli_module._warn_temperature_sweep(list(expanded), [0.0, 1.0])
         out = captured_console.getvalue()
-        assert "gpt-5.5" in out
-        assert "claude-opus-4-8" in out
+        assert "gpt-5.6-sol" in out
+        assert "claude-opus-5" in out
 
     def test_silent_when_only_one_temperature_requested(
         self, captured_console: io.StringIO
