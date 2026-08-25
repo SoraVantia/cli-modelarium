@@ -562,7 +562,7 @@ def test_complete_panel_shows_free_for_local_models() -> None:
 async def test_provider_error_message_redacted_in_state(fake_sleep: Any) -> None:
     provider = _FailingProvider(
         "openai",
-        errors=[ProviderError("leaked sk-proj-abc1234567890XYZdef", provider="openai")],
+        errors=[ProviderError("leaked sk-proj-NOT_A_REAL_KEY_test_fixture_00", provider="openai")],
         success_result=CompletionResult(output="ok"),
     )
 
