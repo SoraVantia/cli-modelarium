@@ -10,6 +10,7 @@ from pathlib import Path
 
 import click
 import httpx
+import keyring.errors
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
@@ -1557,6 +1558,101 @@ def _emit_batch_results(
 # ===== configure =====
 
 
+_KEYS_SET_HINT = "cli-modelarium keys set <provider>"
+
+
+def _configure_summary(
+    *,
+    total: int,
+    first_provider: str,
+    configured: int,
+    skipped: int,
+    invalid: int,
+    not_stored: int,
+    not_reached: int,
+    no_backend: bool,
+    interrupted: bool,
+) -> tuple[str, str, str]:
+    """Return (body, title, border_style) for what `configure` actually did.
+
+    Five counters rather than one, because `saved` alone rendered a run that
+    skipped ten providers identically to one that rejected ten. `invalid` and
+    `not_stored` stay separate for the same reason: a user whose keychain is
+    locked, told their keys were "invalid", goes and checks the keys.
+
+    `not_reached` exists because stopping early - on a missing backend or on
+    Ctrl-C - leaves providers that were neither configured, skipped nor
+    failed. A summary that omits them is the defect this function replaces.
+    """
+    counts = [
+        (configured, "configured"),
+        (invalid, "invalid"),
+        (not_stored, "not stored"),
+        (skipped, "skipped"),
+    ]
+    parts = [f"{n} {label}" for n, label in counts if n]
+    if not_reached:
+        parts.append(f"{not_reached} not reached")
+    tally = ", ".join(parts) if parts else f"all {total} providers skipped"
+
+    if interrupted:
+        # The user asked to stop, so nothing here claims completion - but the
+        # keys already in the keychain are still theirs and must be named.
+        body = f"{tally}.\nAnything not configured can be added with:\n{_KEYS_SET_HINT}"
+        return body, "Setup cancelled", "yellow" if configured else "dim"
+
+    if no_backend:
+        env_example = f"{first_provider.upper()}_API_KEY"
+        # A backend can only vanish mid-run, but if it does, earlier saves
+        # stand - so the opening line must not claim nothing was stored.
+        opening = (
+            "The OS keychain stopped responding partway through."
+            if configured
+            else "No keys were stored - this machine has no OS keychain."
+        )
+        body = (
+            f"{opening}\n"
+            f"{tally}.\n"
+            f"Use environment variables instead ({env_example}, one per provider).\n"
+            f'See "Headless Linux servers" in the README.'
+        )
+        if configured:
+            return body, "Configured with errors", "yellow"
+        return body, "Configuration failed", "red"
+
+    if configured and not (invalid or not_stored):
+        # Only offer the recovery command when there is something to recover;
+        # "add a skipped provider" reads as a contradiction after a run that
+        # skipped none.
+        follow_up = (
+            f"Add a skipped provider later with:\n{_KEYS_SET_HINT}"
+            if skipped
+            else "Run: cli-modelarium list-models"
+        )
+        return f"{tally}.\n{follow_up}", "Configuration complete", "green"
+
+    if configured:
+        body = f"{tally}.\nThose keys were not stored. Retry with:\n{_KEYS_SET_HINT}"
+        return body, "Configured with errors", "yellow"
+
+    if invalid or not_stored:
+        # "Check the key format" is only true advice when a format was the
+        # problem. A locked keychain sent there goes and inspects a key that
+        # was never wrong.
+        guidance = (
+            "Check the key format and retry with:"
+            if invalid and not not_stored
+            else "Retry with:"
+        )
+        return (
+            f"No keys were stored. {tally}.\n{guidance}\n{_KEYS_SET_HINT}",
+            "Configuration failed",
+            "red",
+        )
+
+    return f"No changes. {tally}.", "No changes", "dim"
+
+
 @main.command()
 def configure() -> None:
     """Interactively set API keys for each provider."""
@@ -1571,8 +1667,10 @@ def configure() -> None:
         )
     )
 
-    saved = 0
-    for provider in providers:
+    configured = skipped = invalid = not_stored = not_reached = 0
+    no_backend = interrupted = False
+
+    for index, provider in enumerate(providers):
         try:
             key = Prompt.ask(
                 f"{provider.capitalize()} API key",
@@ -1582,32 +1680,77 @@ def configure() -> None:
             )
         except (EOFError, KeyboardInterrupt):
             console.print("\n[yellow]Setup cancelled.[/yellow]")
-            sys.exit(EXIT_CALL_FAILED)
+            interrupted = True
+            not_reached = len(providers) - index
+            break
 
         if not key.strip():
+            skipped += 1
             console.print(f"  [dim]Skipped {provider}[/dim]")
             continue
 
         try:
             save_key(provider, key)
         except ValueError as e:
-            console.print(f"  [red]Invalid format - {e}[/red]")
+            # Format rejected locally - nothing was sent anywhere. Redacted
+            # because only security.py's wording keeps the key out of it, and
+            # nothing enforces that.
+            invalid += 1
+            console.print(f"  [red]Invalid format - {redact_secrets(str(e))}[/red]")
             continue
-        except Exception as e:
+        except keyring.errors.NoKeyringError as e:
+            # There is no backend. It will not appear between two prompts, so
+            # every remaining provider would raise identically - stop asking
+            # for credentials that cannot be stored anywhere.
+            not_stored += 1
+            no_backend = True
+            not_reached = len(providers) - index - 1
+            console.print(f"  [red]Could not save: {redact_secrets(str(e))}[/red]")
+            break
+        except keyring.errors.KeyringError as e:
+            # Deliberately NOT a break. This arm covers KeyringLocked, InitError
+            # and PasswordSetError - and PasswordSetError is what KWallet raises
+            # when someone dismisses one OS auth dialog. Abandoning ten more
+            # providers because a user pressed Escape once would be worse than
+            # the defect this replaces.
+            not_stored += 1
+            console.print(f"  [red]Could not save: {redact_secrets(str(e))}[/red]")
+            continue
+        except Exception as e:  # noqa: BLE001 - see comment
+            # Windows calls win32cred.CredWrite unwrapped, so a write failure
+            # arrives as a bare pywintypes.error that is not a KeyringError at
+            # all. This arm is the only thing covering that platform.
+            not_stored += 1
             console.print(f"  [red]Could not save: {redact_secrets(str(e))}[/red]")
             continue
 
-        saved += 1
+        configured += 1
         console.print(f"  [green]Saved {provider} to keychain[/green]")
 
-    console.print()
-    console.print(
-        Panel(
-            f"{saved} of {len(providers)} providers configured.\nRun: cli-modelarium list-models",
-            title="Configuration complete",
-            border_style="green",
-        )
+    body, title, border_style = _configure_summary(
+        total=len(providers),
+        first_provider=providers[0] if providers else "openai",
+        configured=configured,
+        skipped=skipped,
+        invalid=invalid,
+        not_stored=not_stored,
+        not_reached=not_reached,
+        no_backend=no_backend,
+        interrupted=interrupted,
     )
+    console.print()
+    console.print(Panel(body, title=title, border_style=border_style))
+
+    if interrupted:
+        sys.exit(EXIT_CALL_FAILED)
+
+    # `attempted` is derived, not counted: every branch that increments it also
+    # increments exactly one of the three, so `failed > 0 while attempted == 0`
+    # cannot arise. Guarding on `configured == 0` alone would fail a run where
+    # the user simply skipped everything, which is not an error.
+    attempted = configured + invalid + not_stored
+    if attempted > 0 and configured == 0:
+        sys.exit(EXIT_CALL_FAILED)
 
 
 # ===== keys =====
