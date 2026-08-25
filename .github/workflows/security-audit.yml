@@ -13,9 +13,9 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
@@ -34,13 +34,12 @@ jobs:
         id: audit
         continue-on-error: true
         run: |
-          set -o pipefail
           pip install pip-audit
-          pip-audit --vulnerability-service osv -r user.txt | tee audit.txt
-          test -s audit.txt
+          pip-audit --vulnerability-service osv -r user.txt 2>&1 | tee audit.txt
+          echo "code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Open an issue if anything was found
-        if: steps.audit.outcome == 'failure'
+        if: steps.audit.outputs.code == '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
