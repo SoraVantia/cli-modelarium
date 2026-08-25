@@ -1,15 +1,10 @@
 """Multi-prompt batch mode.
 
-Three concerns:
-
-    1. Parsing & validation - load_batch_file() reads .txt or .json into
-       BatchPrompt dataclasses with size-limit and structure checks.
-    2. Cost-and-volume guards - check_batch_size_limits() rejects oversized
-       batches before any API call is made.
-    3. Orchestration - run_batch() builds StreamStates for every
-       (prompt x system x model x temperature) tuple and runs them via the
-       same `_call_with_retry` helper as the compare command, but with a
-       Rich Progress bar instead of per-token Live panels.
+load_batch_file() reads .txt or .json into BatchPrompt dataclasses.
+check_batch_size_limits() rejects oversized batches before any API call is
+made. run_batch() builds StreamStates for every (prompt x system x model x
+temperature) tuple and runs them via the same `_call_with_retry` helper as the
+compare command, but with a Rich Progress bar instead of per-token Live panels.
 
 Per-prompt system-prompt override (when a BatchPrompt has a `system` field)
 takes precedence over command-line system prompts for that specific prompt
@@ -54,8 +49,7 @@ from cli_modelarium.streaming import (
 # file into thousands of billable calls before the first result lands. Both
 # are checked up front; --force-large skips them, --max-cost still applies.
 #
-# The numbers are arbitrary. Raise them if they're wrong for you - rate
-# limits bind long before anything else does.
+# The numbers are arbitrary - rate limits bind long before anything else does.
 MAX_PROMPTS_PER_BATCH = 1000
 MAX_TOTAL_CALLS = 10_000
 
