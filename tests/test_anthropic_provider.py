@@ -118,7 +118,7 @@ def _make_provider(
     monkeypatch.setattr(
         "cli_modelarium.providers.anthropic_provider.AsyncAnthropic", fake_async_anthropic
     )
-    provider = AnthropicProvider(api_key="sk-ant-api03-test1234567890abcdefghi")
+    provider = AnthropicProvider(api_key="sk-ant-api03-NOT_A_REAL_KEY_test_fixture")
     return provider, messages
 
 
@@ -248,7 +248,7 @@ def _build_response(status: int, headers: dict[str, str] | None = None) -> httpx
 
 async def test_authentication_error_translated(monkeypatch: pytest.MonkeyPatch) -> None:
     err = anthropic.AuthenticationError(
-        "invalid key sk-ant-leakedkey1234567890abcdefghi",
+        "invalid key sk-ant-NOT_A_REAL_KEY_leaked_00000",
         response=_build_response(401),
         body=None,
     )
