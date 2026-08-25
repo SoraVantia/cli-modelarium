@@ -10,24 +10,14 @@ from cli_modelarium.pricing import PRICING, RETIRED_MODELS, is_local_model
 # providers needs all N keys and aborts on the first one missing. `all` and
 # `all-local` are the exception; `_resolve_dynamic_groups` resolves those.
 MODEL_GROUPS: dict[str, list[str]] = {
-    "all-premium": [
-        "gpt-5.5",
-        "claude-opus-4-8",
-        "gemini-3.1-pro-preview",
-        "grok-4.3",
-        "deepseek-v4-pro",
-        "mistral-large-latest",
-        "qwen3.7-max",
-        "glm-5.2",
-    ],
     "all-flagship": [
-        "gpt-5.5",
-        "claude-opus-4-8",
+        "gpt-5.6-sol",
+        "claude-opus-5",
         "gemini-3.1-pro-preview",
-        "grok-4.3",
+        "grok-4.6",
         "deepseek-v4-pro",
         "mistral-large-latest",
-        "qwen3.7-max",
+        "qwen3.8-max",
         "glm-5.2",
     ],
     "all-budget": [
@@ -72,6 +62,21 @@ MODEL_GROUPS: dict[str, list[str]] = {
     "all-local": [],
     "all": [],
 }
+
+# `all-premium` is the SAME list object as `all-flagship`, not a copy of it.
+# They were two independent literals with identical contents, so every
+# membership edit had to be made twice and nothing caught a miss.
+#
+# `all-flagship` is the canonical name: the group means each provider's top
+# model, not a price tier - deepseek-v4-pro is DeepSeek's flagship at 0.435
+# input, which nobody would call premium. `all-premium` keeps working for
+# anyone who types it.
+#
+# The value must be the list, never the string "all-flagship". `expand_group`
+# does `list(MODEL_GROUPS.get(group, []))`, and `list()` on a string iterates
+# characters - an alias by string yields twelve one-character model ids and
+# fails with "Unknown model: a", which points nowhere near the cause.
+MODEL_GROUPS["all-premium"] = MODEL_GROUPS["all-flagship"]
 
 # Group names that need dynamic resolution by the caller (not just lookup).
 DYNAMIC_GROUPS = frozenset({"all-local", "all"})
