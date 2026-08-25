@@ -98,8 +98,8 @@ class TestIsGroupName:
 class TestExpandGroup:
     def test_premium_includes_flagships(self) -> None:
         expanded = expand_group("all-premium")
-        assert "gpt-5.5" in expanded
-        assert "claude-opus-4-8" in expanded
+        assert "gpt-5.6-sol" in expanded
+        assert "claude-opus-5" in expanded
         assert "gemini-3.1-pro-preview" in expanded
 
     def test_budget_includes_cheap_models(self) -> None:
@@ -143,13 +143,13 @@ class TestParseModelsArg:
 
     def test_group_expanded_in_place(self) -> None:
         expanded = parse_models_arg("all-premium")
-        assert "gpt-5.5" in expanded
-        assert "claude-opus-4-8" in expanded
+        assert "gpt-5.6-sol" in expanded
+        assert "claude-opus-5" in expanded
         assert "all-premium" not in expanded
 
     def test_group_and_explicit_mixed(self) -> None:
         expanded = parse_models_arg("all-premium,local/llama-3.3")
-        assert "claude-opus-4-8" in expanded
+        assert "claude-opus-5" in expanded
         assert "local/llama-3.3" in expanded
 
     def test_dynamic_group_preserved_for_caller(self) -> None:
@@ -176,9 +176,9 @@ class TestGroupCoverage:
 class TestGroupMembershipInvariant:
     """Every static group member must be a live PRICING entry.
 
-    No test pinned group membership before 0.1.5, which is exactly why
-    deepseek-reasoner sat dead in all-reasoning against a fully green suite.
-    This turns that one-time fix into a standing invariant.
+    No test pinned group membership before 0.1.5. deepseek-reasoner sat dead
+    in all-reasoning against a fully green suite. This turns that one-time fix
+    into a standing invariant.
     """
 
     STATIC_GROUPS = sorted(set(MODEL_GROUPS) - set(DYNAMIC_GROUPS))
@@ -195,6 +195,8 @@ class TestGroupMembershipInvariant:
 
     @pytest.mark.parametrize("group", STATIC_GROUPS)
     def test_group_is_non_empty(self, group: str) -> None:
+        # Does not catch an alias stored as the string "all-flagship" instead
+        # of the list: a non-empty string is truthy, so this passes outright.
         assert MODEL_GROUPS[group], f"{group} is empty but not declared dynamic"
 
     def test_invariant_would_catch_a_missing_id(self) -> None:
