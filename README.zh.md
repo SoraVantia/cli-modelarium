@@ -197,6 +197,12 @@ cli-modelarium "Explain recursion in one paragraph" \
   --judge-criteria "accuracy,clarity,brevity"
 ```
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-judge-demo.gif" alt="cli-modelarium 终端演示：LLM 评判为两个模型打分，比较表显示每个模型的分数，每条回答下方显示评判写出的评分理由。" width="848">
+</p>
+
+**演示提示：** 分数和成本来自录制时的单次运行。评判分数是参考信号而非绝对标准，在不同运行或模型版本之间不会精确重现。定价会变化；在依赖任何数字之前，请对照提供商进行验证。
+
 ### 针对已知事实检测幻觉
 
 ```bash
@@ -260,7 +266,7 @@ fi
 
 `--output-format json` 是必需的：默认输出不含任何机器可读的错误字段。请注意，在调用任何模型*之前*发生的失败（缺少密钥、未知模型、批处理文件有误）根本不会生成 JSON；此时控制台消息是唯一的信号。
 
-**隐私提示：** JSON、CSV 和 Markdown 每种输出格式都会嵌入每条结果的完整提示词和完整模型响应，以及提供商的任何错误消息。在提交输出文件或将其作为公开 CI 产物上传之前，请将其视为敏感信息。
+**隐私提示：** JSON、CSV 和 Markdown 每种输出格式都会嵌入每条结果的完整提示词和完整模型响应，以及提供商的任何错误消息。JSON 还会嵌入每个评判模型的推理文本；`--include-reasoning` 仅控制控制台显示，不影响文件，CSV 和 Markdown 不包含该内容。在提交输出文件或将其作为公开 CI 产物上传之前，请将其视为敏感信息。
 
 ## 配置
 
@@ -339,7 +345,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 
 | 组 | 模型 |
 |-------|--------|
-| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
+| `all-premium` / `all-flagship` | gpt-5.6-sol, claude-opus-5, gemini-3.1-pro-preview, grok-4.6, deepseek-v4-pro, mistral-large-latest, qwen3.8-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
 | `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
@@ -368,7 +374,7 @@ Cli Modelarium 使用模块化的提供商抽象层，隐藏了 OpenAI 的 `mess
 
 ### 定价数据
 
-Cli Modelarium 内置的所有定价均于 **2026 年 7 月 29 日** 从官方提供商文档中验证。Z.AI/GLM 的定价是唯一的例外：它们保留了较早的 **2026 年 6 月 22 日** 验证日期，未包含在最近一次验证中，自那时起其条目未发生变化。LLM 定价经常变化（有时每月一次）。`pricing_as_of` 日期包含在 JSON 输出中，并显示在控制台上；CSV 和 Markdown 输出不包含该日期。在依赖成本计算进行预算或生产决策之前，请始终对照每个提供商的官方定价页面进行验证。
+Cli Modelarium 内置的大部分定价均于 **2026 年 7 月 29 日** 从官方提供商文档中验证。部分条目带有各自的验证日期，标注在注册表中每个条目旁；Z.AI/GLM 的定价最早，为 **2026 年 6 月 22 日**。LLM 定价经常变化（有时每月一次）。`pricing_as_of` 日期包含在 JSON 输出中，并显示在控制台上；CSV 和 Markdown 输出不包含该日期。在依赖成本计算进行预算或生产决策之前，请始终对照每个提供商的官方定价页面进行验证。
 
 价格为每个提供商每 100 万令牌的标准/标价公开费率（非批量、优先、非高峰或促销定价）；对于按输入大小分层的模型，显示入门/短上下文层级，缓存定价为缓存读取费率。DashScope/Qwen 成本反映非思考费率（该工具发送 `enable_thinking=false`）。
 
