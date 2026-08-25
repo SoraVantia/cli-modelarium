@@ -98,11 +98,11 @@ def dual_provider(monkeypatch: pytest.MonkeyPatch) -> _DualPurposeProvider:
     # _get_provider_instance. Set fake env vars for every provider that
     # might be used as a judge in these tests so validation passes.
     for env, value in (
-        ("OPENAI_API_KEY", "sk-proj-test1234567890abcdefghi"),
-        ("ANTHROPIC_API_KEY", "sk-ant-test1234567890abcdefghi"),
-        ("GOOGLE_API_KEY", "AIzaTestabcdef1234567890abcdef1234567"),
-        ("XAI_API_KEY", "xai-test1234567890abcdefghi"),
-        ("GROQ_API_KEY", "gsk_test1234567890abcdefghi"),
+        ("OPENAI_API_KEY", "sk-proj-NOT_A_REAL_KEY_test_fixture_00"),
+        ("ANTHROPIC_API_KEY", "sk-ant-NOT_A_REAL_KEY_test_fixture_0"),
+        ("GOOGLE_API_KEY", "AIzaSyNOT_A_REAL_KEY-test_fixture_000000"),
+        ("XAI_API_KEY", "xai-NOT_A_REAL_KEY_test_fixture_00"),
+        ("GROQ_API_KEY", "gsk_NOT_A_REAL_KEY_test_fixture_00"),
     ):
         monkeypatch.setenv(env, value)
     return fake
