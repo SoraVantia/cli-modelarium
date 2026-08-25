@@ -143,13 +143,14 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
         "provider": "anthropic",
         "rejects_sampling_params": True,
     },
-    # List price, per this registry's store-list-not-promo policy. Anthropic is
-    # running introductory pricing of 2.00 / 10.00 (cached 0.20) through
-    # 2026-08-31; list pricing below takes effect 2026-09-01.
+    # Anthropic states the introductory 2/10 rate is now permanent and the
+    # planned 2026-09-01 increase is cancelled. Verified 2026-08-20, out of band
+    # with the block date above - the entry that follows is what Anthropic
+    # charges today, not a rate predicted to start on a date.
     "claude-sonnet-5": {
-        "input": 3.00,
-        "output": 15.00,
-        "cached_input": 0.30,
+        "input": 2.00,
+        "output": 10.00,
+        "cached_input": 0.20,
         "provider": "anthropic",
         "rejects_sampling_params": True,
     },
@@ -200,7 +201,28 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
         "cached_input": 0.025,
         "provider": "google",
     },
-    "gemini-3.6-flash": {"input": 1.50, "output": 7.50, "cached_input": 0.15, "provider": "google"},
+    # Verified 2026-08-20, out of band with the block date above. Google's
+    # published schedule as of that date shows this entry doubling to
+    # 1.50 / 7.50 on 2027-01-01; re-check before then. That records what the
+    # page said and when it was read - not a rate predicted to start on a date.
+    "gemini-3.7-flash": {
+        "input": 0.75,
+        "output": 3.75,
+        "cached_input": 0.075,
+        "provider": "google",
+    },
+    # Google's published schedule as of 2026-08-23: 0.75 / 3.75 / 0.075 through
+    # 2026-12-31, then 1.50 / 7.50 / 0.15 from 2027-01-01. Re-check before that
+    # date. The row below carried the 2027 figures until 2026-08-23 - a future
+    # rate written into a field that means "current", which is how every Sonnet 5
+    # figure came to print high in the other direction. Identical to
+    # gemini-3.7-flash above, which is how Google prices the two.
+    "gemini-3.6-flash": {
+        "input": 0.75,
+        "output": 3.75,
+        "cached_input": 0.075,
+        "provider": "google",
+    },
     # No shutdown date announced, and Google names no replacement. Checked
     # 2026-08-07 against ai.google.dev/gemini-api/docs/deprecations.
     "gemini-2.5-flash": {"input": 0.30, "output": 2.50, "cached_input": 0.03, "provider": "google"},
@@ -214,6 +236,11 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
     },
     # ===== xAI Grok (xAI uses dots in model IDs) =====
     # Verified 2026-07-29.
+    # Verified 2026-08-20, out of band with the block date above. Entry tier:
+    # xAI bills grok-4.6 at this rate up to a 200k-token request. Past 200k
+    # EVERY token in the request bills at the higher tier, not just the excess,
+    # so a single long request costs more than this row implies.
+    "grok-4.6": {"input": 2.00, "output": 6.00, "cached_input": 0.50, "provider": "xai"},
     "grok-4.3": {"input": 1.25, "output": 2.50, "cached_input": 0.20, "provider": "xai"},
     "grok-4.20-0309-non-reasoning": {
         "input": 1.25,
@@ -281,6 +308,23 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
     # Single rate per entry = entry input-tier, non-thinking output (we send
     # enable_thinking=false). cached_input = Implicit-Cache read rate where offered.
     # Verified 2026-07-29.
+    # The two entries below were verified 2026-08-20, out of band with the
+    # block date above, from the Singapore column - the region this endpoint
+    # serves. Global is roughly 18% cheaper and belongs to a different host.
+    #
+    # Their cached_input is a smaller fraction of input (8.5% and 10%) than
+    # every older row here carries (20% without exception). That is what the
+    # 2026-08-20 pass recorded; whether Alibaba changed the cache rate class
+    # for these models or the older rows use a different one is NOT settled.
+    "qwen3.8-max": {"input": 2.00, "output": 6.00, "cached_input": 0.17, "provider": "dashscope"},
+    # Entry input tier, to 32k. Above 32k this bills 0.10 / 0.40, above 256k
+    # 0.20 / 0.80 - so a long-context run costs well over this row.
+    "qwen3.7-flash": {
+        "input": 0.03,
+        "output": 0.13,
+        "cached_input": 0.003,
+        "provider": "dashscope",
+    },
     "qwen3.7-max": {"input": 2.50, "output": 7.50, "cached_input": 0.50, "provider": "dashscope"},
     "qwen3.7-plus": {"input": 0.40, "output": 1.60, "cached_input": 0.08, "provider": "dashscope"},
     "qwen3.6-flash": {"input": 0.25, "output": 1.50, "provider": "dashscope"},
@@ -296,10 +340,14 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
     # cached_input = Z.AI's "Cached Input" (cache-read) rate; "Cached Input Storage"
     # (limited-time free) has no field. Text models only (vision glm-5v-turbo excluded).
     # Verified against Z.AI's pricing page (docs.z.ai), 2026-06-22.
-    # That date is older than PRICING_AS_OF deliberately: this block was NOT re-checked
-    # in the 2026-07-29 pass, and its 14 entries have not changed since the date above.
-    # The mismatch records what was actually checked and when - it is accurate, not a
-    # comment someone forgot to update.
+    # That date is older than PRICING_AS_OF deliberately: this block was not part of
+    # the 2026-07-29 pass, and every entry checked on 2026-06-22 is unchanged since.
+    # Entries added or re-checked later carry their own date beside them - see
+    # glm-5.3 below. No count is stated here on purpose: a number in prose goes
+    # stale the moment a row is added, and nothing in the suite would catch it.
+    # Verified 2026-08-20, out of band with the block date above - the entry
+    # below is the only one here checked after 2026-06-22.
+    "glm-5.3": {"input": 1.40, "output": 4.40, "cached_input": 0.26, "provider": "zai"},
     "glm-5.2": {"input": 1.40, "output": 4.40, "cached_input": 0.26, "provider": "zai"},
     "glm-5.1": {"input": 1.40, "output": 4.40, "cached_input": 0.26, "provider": "zai"},
     "glm-5": {"input": 1.00, "output": 3.20, "cached_input": 0.20, "provider": "zai"},
