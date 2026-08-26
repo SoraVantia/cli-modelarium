@@ -1,8 +1,9 @@
 """Shared test fixtures for the cli-modelarium suite.
 
-Two autouse fixtures keep tests hermetic:
-    * `_mock_keyring`  - swaps in an in-memory keyring backend per test
-    * `_clean_env`     - strips any leftover *_API_KEY env vars
+Three autouse fixtures keep tests hermetic:
+    * `_mock_keyring`   - swaps in an in-memory keyring backend per test
+    * `_clean_env`      - strips any leftover *_API_KEY env vars
+    * `_stdin_getpass`  - forces `getpass` to read `sys.stdin`, not `/dev/tty`
 
 Tests that need to set an env var should use monkeypatch explicitly.
 
@@ -13,6 +14,7 @@ depend on the platform. See their docstrings for the two ways that bites.
 
 from __future__ import annotations
 
+import getpass
 import io
 import os
 from types import SimpleNamespace
@@ -74,6 +76,31 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for var in list(os.environ):
         if var.endswith("_API_KEY"):
             monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _stdin_getpass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force `getpass` down its stdin branch for every test.
+
+    `configure` and `keys set` prompt with `Prompt.ask(..., password=True)`,
+    which makes Rich call `getpass.getpass("")`. On POSIX that opens
+    `/dev/tty` and reads from it, ignoring `sys.stdin` - so a `CliRunner`
+    test that pipes its answers blocks forever wherever a controlling
+    terminal is present. Windows is unaffected: `win_getpass` returns the
+    fallback when `sys.stdin` has been replaced, which is what `CliRunner`
+    does.
+
+    This does not create a coverage gap; it makes an existing one
+    deliberate. A runner has no terminal, so the `/dev/tty` path has never
+    been exercised by any test. Pinning the fallback costs nothing that was
+    not already lost and buys a suite that behaves the same on a
+    developer's machine as on a runner.
+
+    `fallback_getpass` warns `GetPassWarning` by construction, so the 35
+    warnings this raises from `test_cli_configure.py` are the fallback
+    branch announcing itself. They are deliberately not suppressed.
+    """
+    monkeypatch.setattr(getpass, "getpass", getpass.fallback_getpass)
 
 
 # ===== rendered-output helpers =====
