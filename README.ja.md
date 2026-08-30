@@ -9,7 +9,7 @@
 
 > 注: 次の7つのセクションは英語版 README にのみ存在します — *Reproducibility analysis*、*Statistical significance testing*、*Bootstrap confidence intervals*、*Paired tests for same-prompt comparisons*、*McNemar's test for hallucination significance*、*Headless Linux servers*、*More examples*。機能自体はすべて利用可能で、ここに欠けているのはその説明だけです。[README.md](https://github.com/SoraVantia/cli-modelarium/blob/main/README.md) を参照してください。
 
-> 11のクラウドプロバイダー＋ローカルモデルのLLM出力をターミナルから横並びで比較。並列ストリーミング、バッチ評価、LLM-as-judgeスコアリング、ハルシネーション検出、CI/CD対応のアサーション機能を搭載。
+> 12のクラウドプロバイダー＋ローカルモデルのLLM出力をターミナルから横並びで比較。並列ストリーミング、バッチ評価、LLM-as-judgeスコアリング、ハルシネーション検出、CI/CD対応のアサーション機能を搭載。
 
 [![CI](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
@@ -57,9 +57,9 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ## 機能
 
-### 🤖 プロバイダー（11のクラウド＋無制限のローカル）
+### 🤖 プロバイダー（12のクラウド＋無制限のローカル）
 
-- **クラウドプロバイダー:** OpenAI、Anthropic、Google (Gemini)、xAI (Grok)、DeepSeek、Mistral、Groq、OpenRouter、Alibaba (DashScope)、Z.AI (GLM)、NVIDIA (NIM)
+- **クラウドプロバイダー:** OpenAI、Anthropic、Google (Gemini)、xAI (Grok)、DeepSeek、Mistral、Groq、OpenRouter、Alibaba (DashScope)、Z.AI (GLM)、NVIDIA (NIM), Moonshot AI (Kimi)
 - **ローカルモデル:** Ollama、LM Studio、vLLM、llama.cpp - localhost で実行される任意の OpenAI 互換サーバー
 - 同じ比較内でローカルモデルとクラウドモデルを混在可能
 - 呼び出しごとに登録済みの任意のモデル ID を選択可能 - 組み込みのグループショートカットに限定されません
@@ -69,7 +69,7 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - すべてのモデルにわたって同時にトークン単位でライブ表示
 - モデルごとのTime-to-First-Token (TTFT) トラッキング
 - どのモデルが最初に終了するかを確認し、出力の分岐をリアルタイムで観察
-- 11のプロバイダーすべてからストリーミング（内部ではSSEを使用）
+- 12のプロバイダーすべてからストリーミング（内部ではSSEを使用）
 
 <p align="center">
   <img src="docs/assets/cli-modelarium-comparison-demo.gif" alt="cli-modelarium のターミナルデモ: 3つのモデルが同じプロンプトへのレスポンスを並列でライブストリーミングし、続いて比較テーブルにモデルごとの Time-to-First-Token、レイテンシー、トークン数、コストが表示されます。" width="718">
@@ -125,12 +125,13 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ### 🛡️ レート制限処理
 
-- プロバイダーごとの同時実行制限（デフォルト5）ですべてのティアのベースラインを尊重
+- プロバイダーごとの同時実行制限（デフォルト5）- 全プロバイダーに同じ値が適用されるため、ご自身のティアと照らして確認してください
 - 指数バックオフによる自動429リトライ
 - Anthropicの529「overloaded」はレート制限とは別に処理
 - 上位ティアのパワーユーザー向けの `--concurrency` フラグ
 - モデルごとの優雅な失敗処理（他のモデルは継続）
 - DashScopeの無料ティアおよびフラッグシップのQwen (qwen3.7-max) のレート制限は、ほとんどのプロバイダーよりも厳しくなっています。429に遭遇した場合は `--concurrency` を下げてください。
+- Moonshot は利用前に最低 1 ドルのチャージが必要で、無料ティアはありません。Tier0 は同時リクエスト1件、毎分3リクエスト、1日150万トークンです。累計10ドルのチャージで Tier1 になります。Tier0 では `--concurrency` を下げてください。
 
 ### 🌐 クロスプラットフォーム
 
@@ -242,7 +243,7 @@ cli-modelarium "Summarize the key features of microservices architecture" \
 | コード | 意味 |
 |--------|------|
 | `0` | 成功。 |
-| `1` | アサーション失敗 - 1つ以上のアサーションが通らなかった。`batch` のみ。`compare` にアサーションはありません。 |
+| `1` | アサーション失敗 - 1つ以上のアサーションが通らなかった、または `batch` の実行が何も検証しなかった。アサーションの判定を出すのは `batch` のみですが、`compare` も予期しないエラーでは `1` で終了することがあります。 |
 | `2` | 実行を完了できなかった。 |
 
 コード `2` は複数の異なる原因を含み、**それらを区別しません**。APIキーの未設定、未知のモデル、提供終了したモデル、プロバイダーのエラー、コスト上限の超過、不正な形式のバッチファイル、許可されないフラグの組み合わせ、出力ファイルの競合、バッチサイズ上限の超過のいずれもコード `2` になります。
@@ -266,7 +267,7 @@ fi
 
 `--output-format json` が必要です。デフォルトの出力には機械可読なエラーフィールドがありません。なお、モデルを呼び出す*前*に発生した失敗（キーの未設定、未知のモデル、不正なバッチファイル）ではJSONがまったく生成されないため、その場合はコンソールのメッセージが唯一の手がかりになります。
 
-**プライバシーに関する注意:** JSON、CSV、Markdown のいずれの出力形式にも、各結果のプロンプト全文とモデル応答全文、さらにプロバイダーのエラーメッセージが含まれます。JSON にはさらに各ジャッジモデルの推論テキストが含まれます。`--include-reasoning` はコンソール表示のみを制御し、ファイルには影響しません。CSV と Markdown には含まれません。出力ファイルをコミットしたり、公開されるCIアーティファクトとしてアップロードしたりする前に、機密情報として扱ってください。
+**プライバシーに関する注意:** JSON、CSV、Markdown のいずれの出力形式にも、各結果のプロンプト全文とモデル応答全文、さらにプロバイダーのエラーメッセージが含まれます。JSON にはさらに各ジャッジモデルの推論テキストが含まれます。`--include-reasoning` はコンソール表示のみを制御し、ファイルには影響しません。CSV と Markdown には含まれません。出力ファイルをコミットしたり、公開されるCIアーティファクトとしてアップロードしたりする前に、機密情報として扱ってください。 データの保持や学習に関する条件はプロバイダーごとに異なります。本ツールはそのいずれについても主張しません。設定する各プロバイダーの規約をご確認ください。
 
 ## 設定
 
@@ -330,6 +331,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, など、一部のQwenモデル、International/Singapore) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air, など；OpenAI互換、海外エンドポイント) | ✅ | ✅ | ✅ |
 | NVIDIA NIM (登録済みの9つのID: Nemotron、Gemma 4、Mistral Nemotron、MiniMax M3、Laguna、Llama 3.1) | ✅ | ✅ | 公開レートなし |
+| Moonshot AI / Kimi (登録済みの4つのID: K3、K2.7 Code、K2.7 Code HighSpeed、K2.6) | ✅ | ✅ | ✅ |
 | **ローカル: Ollama** | ❌ | ✅ | 無料 |
 | **ローカル: LM Studio** | ❌ | ✅ | 無料 |
 | **ローカル: vLLM** | ❌ | ✅ | 無料 |
@@ -417,7 +419,7 @@ LLMは温度 > 0 で非決定論的です - 同じプロンプトを再実行す
 より信頼性の高い結論を導き出すには:
 - `--runs 5`（またはそれ以上）を使用すると、各比較を自動的にN回実行し、統計サマリー（平均/中央値のレイテンシ、変動係数、最頻出力、出力の多様性）を確認できます。変動係数が 0.05 を下回れば、実行間でモデルの挙動が安定していることを示します。
 - ハルシネーションの一貫性を分析するには、`--runs` と `--check-hallucination` を組み合わせて、複数回の実行でモデルがどの程度の頻度でハルシネーションを起こすか（ハルシネーション率）を確認してください。
-- より決定論的な出力のために `--temperatures 0` を使用。一部のモデルは温度設定を一切受け付けません - `claude-opus-4-7`、`claude-opus-4-8`、`claude-opus-5`、`claude-sonnet-5`、`claude-fable-5`、`o3`、`o4-mini`、`gpt-5`、`gpt-5.5`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna` です。ツールはこれらのモデルに対してこのフィールドを省略するため呼び出しは成功し、モデルはプロバイダーのデフォルト値で実行されます。
+- より決定論的な出力のために `--temperatures 0` を使用。一部のモデルは温度設定を一切受け付けません - `claude-opus-4-7`、`claude-opus-4-8`、`claude-opus-5`、`claude-sonnet-5`、`claude-fable-5`、`o3`、`o4-mini`、`gpt-5`、`gpt-5.5`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`kimi-k3`、`kimi-k2.7-code`、`kimi-k2.7-code-highspeed`、`kimi-k2.6` です。ツールはこれらのモデルに対してこのフィールドを省略するため呼び出しは成功し、モデルはプロバイダーのデフォルト値で実行されます。
 - 1つだけでなく、複数のプロンプトにわたって比較する
 - 体系的な分析のために実行結果を保存するには `--output json` フラグを使用（`--runs > 1` の場合、JSON にはセルごとの `stats_by_cell` 集計が含まれます）
 
