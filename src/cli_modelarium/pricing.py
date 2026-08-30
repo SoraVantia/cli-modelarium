@@ -389,6 +389,65 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
     "minimaxai/minimax-m3": {"input": 0.0, "output": 0.0, "provider": "nvidia"},
     "poolside/laguna-xs-2.1": {"input": 0.0, "output": 0.0, "provider": "nvidia"},
     "meta/llama-3.1-8b-instruct": {"input": 0.0, "output": 0.0, "provider": "nvidia"},
+    # ===== Moonshot AI (Kimi) =====
+    # Read from platform.kimi.ai/docs/models.md on 2026-08-31, out of band with
+    # the block date above. NOT verified by a live call: Moonshot requires a $1
+    # minimum top-up and no key was purchased, so every figure here is read
+    # rather than exercised.
+    #
+    # NO `cached_input` ON ANY ROW, deliberately - and not because Moonshot has
+    # no cache rate. It publishes one per model. The chat API documents `usage`
+    # as four FLAT fields (prompt_tokens, completion_tokens, total_tokens,
+    # cached_tokens) with no `prompt_tokens_details`, and
+    # `OpenAIProvider.complete()` reads cached_tokens ONLY from inside
+    # `prompt_tokens_details`. Against the documented shape a registered rate
+    # could never fire, so these would be four dead constants. Cached tokens
+    # therefore bill at the full input rate via the `calculate_cost` fallback -
+    # an over-report against a real cache hit, which is the safe direction and
+    # matches the Mistral, Groq and OpenRouter rows. Add the rates only once a
+    # live call shows a nested shape; `tests/test_moonshot_provider.py` pins
+    # what the client extracts from each shape, so a wrong assumption fails
+    # loudly there rather than as a wrong cost figure.
+    #
+    # All four fix temperature (and top_p, n, presence_penalty,
+    # frequency_penalty); passing another value errors. Flagged from the
+    # parameter reference, not from a measured 400 - see
+    # `test_temperature_predicate.py`.
+    #
+    # kimi-k3 always reasons: reasoning_effort defaults to "max" and
+    # max_completion_tokens to 131072, and it cannot be turned off. The output
+    # rate below is what that default is priced against.
+    "kimi-k3": {
+        "input": 3.00,
+        "output": 15.00,
+        "provider": "moonshot",
+        "rejects_sampling_params": True,
+    },
+    "kimi-k2.7-code": {
+        "input": 0.95,
+        "output": 4.00,
+        "provider": "moonshot",
+        "rejects_sampling_params": True,
+    },
+    # Exactly double kimi-k2.7-code on both columns. That is Moonshot's
+    # published relationship - the same model on a faster serving route - not a
+    # copied row or a typo.
+    "kimi-k2.7-code-highspeed": {
+        "input": 1.90,
+        "output": 8.00,
+        "provider": "moonshot",
+        "rejects_sampling_params": True,
+    },
+    # Shares kimi-k2.7-code's input and output exactly; the two differ only in
+    # the cache-hit rate, which is not registered here. Thinking can be disabled
+    # through `extra_body`, which also changes the fixed temperature - not taken:
+    # the rate stored is the thinking rate, as the DashScope rows do.
+    "kimi-k2.6": {
+        "input": 0.95,
+        "output": 4.00,
+        "provider": "moonshot",
+        "rejects_sampling_params": True,
+    },
     # ===== Local =====
     # Wildcard entry. Any model with `local/` prefix resolves here and costs $0.
     "local/*": {"input": 0.0, "output": 0.0, "provider": "local", "is_local": True},
