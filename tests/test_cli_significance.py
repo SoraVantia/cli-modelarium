@@ -338,7 +338,7 @@ class TestJsonOutput:
         tests = payload["significance_tests"]
         assert len(tests) == 1
         entry = tests[0]
-        # Fields the prompt requires for the JSON schema
+        # Every field a consumer parsing significance_tests can rely on.
         for required_key in [
             "model_a", "model_b", "metric", "n_a", "n_b",
             "mean_a", "mean_b", "test_used", "p_value",
