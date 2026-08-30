@@ -32,12 +32,17 @@ from cli_modelarium.security import redact_secrets
 def _billable_output_tokens(usage: Any, input_tokens: int) -> int:
     """Output tokens as Google bills them, thinking included.
 
-    Google is the only provider in this tool that reports reasoning separately:
+    Google is the only provider here KNOWN to report reasoning separately:
     OpenAI, Anthropic and Qwen all fold it into their own output count, so
     summing here makes Gemini consistent with the rest of the registry rather
     than making the shared schema Google-shaped. Google's pricing page labels
     the rate "Output price (including thinking tokens)", so `thoughts_token_count`
     is billed at the output rate and belongs in the same number.
+
+    Moonshot is the open case, not a counter-example: its Kimi models always
+    reason, and whether `completion_tokens` includes those tokens has never been
+    checked against the live API. If it excludes them, that provider needs the
+    same summing this function does, and this paragraph is wrong.
 
     Reading only `candidates_token_count`, as this did before, understated
     every thinking model's cost. Measured 2026-08-20 against gemini-3.6-flash:
