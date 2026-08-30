@@ -29,6 +29,8 @@ class MockState:
     output_tokens: int = 0
     cost_usd: float = 0.0
     error: str | None = None
+    temperature: float = 0.0
+    system_prompt: str | None = None
 
 
 class TestPairedTTest:
@@ -102,17 +104,17 @@ class TestExtractPairedSamples:
         paired = _extract_paired_metric_samples(states, None, "latency_ms")
 
         assert paired["model_a"] == {
-            0: 100.0,
-            1: 101.0,
-            2: 102.0,
-            3: 103.0,
-            4: 104.0,
+            (0.0, None, 0): 100.0,
+            (0.0, None, 1): 101.0,
+            (0.0, None, 2): 102.0,
+            (0.0, None, 3): 103.0,
+            (0.0, None, 4): 104.0,
         }
         assert paired["model_b"] == {
-            0: 200.0,
-            1: 201.0,
-            3: 203.0,
-            4: 204.0,
+            (0.0, None, 0): 200.0,
+            (0.0, None, 1): 201.0,
+            (0.0, None, 3): 203.0,
+            (0.0, None, 4): 204.0,
         }
 
         # Alignment should drop run_index 2 (only A has it)
@@ -132,7 +134,7 @@ class TestExtractPairedSamples:
             ],
         }
         paired = _extract_paired_metric_samples(states, None, "latency_ms")
-        assert paired["model_a"] == {0: 100.0, 2: 102.0}
+        assert paired["model_a"] == {(0.0, None, 0): 100.0, (0.0, None, 2): 102.0}
 
     def test_unknown_metric_raises(self) -> None:
         # Non-empty states required to reach the metric-routing branch.
@@ -143,16 +145,65 @@ class TestExtractPairedSamples:
             _extract_paired_metric_samples(states, None, "bogus")
 
     def test_align_empty_intersection_returns_empty(self) -> None:
-        a, b = _align_paired_samples({0: 1.0}, {1: 2.0})
+        a, b = _align_paired_samples({(0.0, None, 0): 1.0}, {(0.0, None, 1): 2.0})
         assert a == []
         assert b == []
 
     def test_align_sorts_by_index(self) -> None:
         a, b = _align_paired_samples(
-            {3: 0.3, 1: 0.1, 2: 0.2}, {3: 1.3, 1: 1.1, 2: 1.2}
+            {(0.0, None, 3): 0.3, (0.0, None, 1): 0.1, (0.0, None, 2): 0.2},
+            {(0.0, None, 3): 1.3, (0.0, None, 1): 1.1, (0.0, None, 2): 1.2},
         )
         assert a == [0.1, 0.2, 0.3]
         assert b == [1.1, 1.2, 1.3]
+
+    def test_run_index_does_not_collide_across_cells(self) -> None:
+        """Three temperatures x two runs is six pairs, not two.
+
+        Keyed on run_index alone the later cells overwrote the earlier ones
+        and the paired test silently ran on a third of the data.
+        """
+        states = {
+            model: [
+                MockState(model, run_index=r, temperature=t, latency_ms=base + t + r)
+                for t in (0.0, 0.5, 1.0)
+                for r in (0, 1)
+            ]
+            for model, base in (("model_a", 100.0), ("model_b", 200.0))
+        }
+
+        paired = _extract_paired_metric_samples(states, None, "latency_ms")
+
+        assert len(paired["model_a"]) == 6
+        a, b = _align_paired_samples(paired["model_a"], paired["model_b"])
+        assert len(a) == 6
+        assert a == [100.0, 101.0, 100.5, 101.5, 101.0, 102.0]
+
+    def test_system_prompt_separates_cells_too(self) -> None:
+        states = {
+            "model_a": [
+                MockState("model_a", run_index=0, system_prompt=sp, latency_ms=v)
+                for sp, v in ((None, 100.0), ("terse", 101.0), ("verbose", 102.0))
+            ],
+        }
+
+        paired = _extract_paired_metric_samples(states, None, "latency_ms")
+
+        assert paired["model_a"] == {
+            (0.0, None, 0): 100.0,
+            (0.0, "terse", 0): 101.0,
+            (0.0, "verbose", 0): 102.0,
+        }
+
+    def test_align_tolerates_the_nones_a_key_can_carry(self) -> None:
+        """Sorting raw tuples raises when a None meets a str or an int."""
+        a_samples = {(0.0, None, None): 1.0, (0.0, "terse", 0): 2.0}
+        b_samples = {(0.0, None, None): 3.0, (0.0, "terse", 0): 4.0}
+
+        a, b = _align_paired_samples(a_samples, b_samples)
+
+        assert a == [1.0, 2.0]
+        assert b == [3.0, 4.0]
 
 
 class TestPairedTestIntegration:
