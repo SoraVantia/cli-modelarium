@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -77,7 +78,10 @@ class AssertionResult:
                                          missing dependency, regex compile fail)
 
     The exit-code logic in cli.py treats `error`-set results as neither pass
-    nor fail - they're surfaced but don't fail the build.
+    nor fail - they're surfaced and don't fail the build on their own. The one
+    exception is a run where they are ALL that happened: with no definitive
+    result anywhere there is no verdict to report, so the build fails rather
+    than claiming a pass rate over an empty denominator.
     """
 
     type: str
@@ -220,6 +224,76 @@ def count_passed(results: list[AssertionResult]) -> tuple[int, int]:
 def count_failed(results: list[AssertionResult]) -> int:
     """Number of definitive failures (excludes error rows)."""
     return sum(1 for r in results if not r.passed and r.error is None)
+
+
+def count_errored(results: list[AssertionResult]) -> int:
+    """Number of assertions that could not run at all (`error` is set)."""
+    return sum(1 for r in results if r.error is not None)
+
+
+@dataclass(frozen=True)
+class AssertionTotals:
+    """Assertion outcomes rolled up across a whole batch.
+
+    `pass_rate` is None when nothing was definitive. That is not a rate of
+    zero and it is not a rate of one - no rate is defined, because the
+    denominator is empty. Substituting 1.0 there is what let a batch that
+    verified nothing report success.
+
+    `definitive == 0` covers two DIFFERENT situations and callers must tell
+    them apart, because the user's remedy differs:
+
+        errored > 0   - assertions were configured and none could run
+                        (bad regex, missing jsonschema, unknown type)
+        errored == 0  - there were no assertions to run in the first place
+
+    Both mean "nothing was verified"; only the first means "something is
+    broken". `configured` is the discriminator.
+    """
+
+    passed: int
+    definitive: int
+    failed: int
+    errored: int
+
+    @property
+    def pass_rate(self) -> float | None:
+        """Passed over definitive, or None when nothing was definitive."""
+        if self.definitive == 0:
+            return None
+        return self.passed / self.definitive
+
+    @property
+    def configured(self) -> bool:
+        """True if any assertion was configured, whether or not it could run."""
+        return self.definitive > 0 or self.errored > 0
+
+    @property
+    def nothing_verified(self) -> bool:
+        """True when no assertion produced a verdict, either way."""
+        return self.definitive == 0
+
+
+def count_assertion_totals(
+    per_state: Iterable[list[AssertionResult] | None],
+) -> AssertionTotals:
+    """Aggregate per-state assertion results into one roll-up.
+
+    `None` entries mean "this state ran no assertions" and are skipped, which
+    matches how both `batch` and the formatters store them.
+    """
+    passed = definitive = failed = errored = 0
+    for results in per_state:
+        if results is None:
+            continue
+        p, d = count_passed(results)
+        passed += p
+        definitive += d
+        failed += count_failed(results)
+        errored += count_errored(results)
+    return AssertionTotals(
+        passed=passed, definitive=definitive, failed=failed, errored=errored
+    )
 
 
 def failed_types(results: list[AssertionResult]) -> list[str]:
