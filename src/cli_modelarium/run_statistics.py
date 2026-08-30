@@ -188,12 +188,19 @@ class SignificanceResult:
     metric: str  # "score", "latency_ms", "output_tokens", "cost_usd"
     n_a: int
     n_b: int
-    mean_a: float
-    mean_b: float
+    # None when the model produced no usable observation at all. 0.0 is a
+    # real mean a model can score, so it cannot double as "no data": a
+    # judging failure used to print "avg 0.000" beside a working model and
+    # read as the worst possible result rather than as an absent one.
+    mean_a: float | None
+    mean_b: float | None
     stdev_a: float | None
     stdev_b: float | None
-    # Values: "welch_t_test", "mann_whitney_u", "trivial",
-    # "zero_variance", or "insufficient_samples".
+    # Values: "welch_t_test", "mann_whitney_u", "paired_t_test",
+    # "wilcoxon_signed_rank", "trivial", "zero_variance", or
+    # "insufficient_samples". The two paired tests were emitted from the day
+    # they were added and this list never learned about them; it is the only
+    # place the set is written down, so it is the only place to keep in step.
     test_used: str
     test_statistic: float | None
     degrees_of_freedom: float | None  # None for Mann-Whitney / non-applicable
@@ -356,6 +363,59 @@ def mann_whitney_u_test(
     return float(result.statistic), float(result.pvalue)
 
 
+def _score_lookup(
+    judge_results: list[Any] | None,
+) -> tuple[dict[int, float], set[int]]:
+    """Index judge scores by the state each verdict was tagged with.
+
+    Returns (score_by_state_id, state_ids_whose_verdict_is_broadcast). A
+    broadcast verdict is one cell's single judgement handed to every run in
+    that cell, so it must contribute ONE observation per cell rather than one
+    per run - see `_cell_deduped_score`.
+    """
+    scores_by_state_id: dict[int, float] = {}
+    broadcast_state_ids: set[int] = set()
+    for jr in judge_results or []:
+        avg = getattr(jr, "average_score", None)
+        state_id = getattr(jr, "_state_id", None)
+        if avg is None or state_id is None:
+            continue
+        scores_by_state_id[state_id] = float(avg)
+        if getattr(jr, "_broadcast", False):
+            broadcast_state_ids.add(state_id)
+    return scores_by_state_id, broadcast_state_ids
+
+
+def _cell_deduped_score(
+    state: Any,
+    scores_by_state_id: dict[int, float],
+    broadcast_state_ids: set[int],
+    seen_cells: set[tuple[str, float, str | None]],
+) -> float | None:
+    """One observation per judged unit, or None if this state contributes none.
+
+    Under per-run judging every run has its own verdict, so every successful
+    run contributes. Under mode-only judging one verdict is broadcast across a
+    cell, so only the first run of that cell contributes and `seen_cells`
+    absorbs the rest - otherwise n counts the same judgement once per run.
+
+    Counting by state id alone is not enough: it happens to give one per cell
+    while the broadcast verdicts are a single shared object, and stops the
+    moment anything copies them.
+    """
+    if state.error is not None:
+        return None
+    score = scores_by_state_id.get(id(state))
+    if score is None:
+        return None
+    if id(state) in broadcast_state_ids:
+        cell = (state.model, state.temperature, state.system_prompt)
+        if cell in seen_cells:
+            return None
+        seen_cells.add(cell)
+    return score
+
+
 def _extract_metric_samples(
     states_by_model: dict[str, list[Any]],
     judge_results: list[Any] | None,
@@ -371,23 +431,17 @@ def _extract_metric_samples(
     samples: dict[str, list[float]] = {}
 
     if metric == "score":
-        # Map each judge_result back to its source state by position.
-        # Both lists are kept in parallel by the caller (run_judging).
-        scores_by_id: dict[int, float] = {}
-        if judge_results:
-            for jr in judge_results:
-                avg = getattr(jr, "average_score", None)
-                if avg is None:
-                    continue
-                state_id = getattr(jr, "_state_id", None)
-                if state_id is not None:
-                    scores_by_id[state_id] = float(avg)
+        scores_by_state_id, broadcast_state_ids = _score_lookup(judge_results)
         for model, states in states_by_model.items():
-            samples[model] = [
-                scores_by_id[id(s)]
-                for s in states
-                if s.error is None and id(s) in scores_by_id
-            ]
+            values: list[float] = []
+            seen_cells: set[tuple[str, float, str | None]] = set()
+            for s in states:
+                score = _cell_deduped_score(
+                    s, scores_by_state_id, broadcast_state_ids, seen_cells
+                )
+                if score is not None:
+                    values.append(score)
+            samples[model] = values
         return samples
 
     for model, states in states_by_model.items():
@@ -477,8 +531,8 @@ def compute_pairwise_significance(
             sample_b = samples_by_model.get(model_b, [])
         n_a, n_b = len(sample_a), len(sample_b)
 
-        mean_a = stdlib_statistics.mean(sample_a) if sample_a else 0.0
-        mean_b = stdlib_statistics.mean(sample_b) if sample_b else 0.0
+        mean_a = stdlib_statistics.mean(sample_a) if sample_a else None
+        mean_b = stdlib_statistics.mean(sample_b) if sample_b else None
         stdev_a = stdlib_statistics.stdev(sample_a) if n_a >= 2 else None
         stdev_b = stdlib_statistics.stdev(sample_b) if n_b >= 2 else None
 
@@ -823,53 +877,83 @@ def mcnemar_test(
     return float(chi2), p
 
 
+# One observation's identity within a model: (temperature, system_prompt,
+# run_index), with run_index None where a whole cell shares one verdict.
+PairKey = tuple[float, str | None, int | None]
+
+
+def _pair_key(state: Any) -> PairKey:
+    """Identify one observation within a model, for pairing against another."""
+    return (state.temperature, state.system_prompt, state.run_index)
+
+
+def _pair_sort_key(key: PairKey) -> tuple[float, str, int]:
+    """Total order over PairKey, tolerating the Nones it may carry.
+
+    `sorted` on the raw tuples raises the moment a None meets a str or an
+    int, which happens with a mix of judged and unjudged prompts.
+    """
+    temperature, system_prompt, run_index = key
+    return (temperature, "" if system_prompt is None else system_prompt,
+            -1 if run_index is None else run_index)
+
+
 def _extract_paired_metric_samples(
     states_by_model: dict[str, list[Any]],
     judge_results: list[Any] | None,
     metric: str,
-) -> dict[str, dict[int, float]]:
-    """Pull per-model metric values indexed by run_index for paired tests.
+) -> dict[str, dict[PairKey, float]]:
+    """Pull per-model metric values indexed by observation for paired tests.
 
-    Returns {model: {run_index: value}}. Failed states (state.error not
+    Returns {model: {PairKey: value}}. Failed states (state.error not
     None) and missing values are excluded so the caller can intersect
-    indices to get genuine pairs.
+    keys to get genuine pairs.
+
+    The key is the whole cell plus the run, not run_index alone: with more
+    than one temperature or system prompt, run_index repeats in every cell
+    and the later cells overwrote the earlier ones, so a 3-temperature x
+    5-run comparison silently paired 5 observations instead of 15.
 
     For metric="score", values come from JudgeResult.average_score via
     the same `_state_id` linkage as `_extract_metric_samples`.
     """
-    samples_by_model: dict[str, dict[int, float]] = {}
+    samples_by_model: dict[str, dict[PairKey, float]] = {}
 
     if metric == "score":
-        scores_by_state_id: dict[int, float] = {}
-        if judge_results:
-            for jr in judge_results:
-                avg = getattr(jr, "average_score", None)
-                state_id = getattr(jr, "_state_id", None)
-                if avg is not None and state_id is not None:
-                    scores_by_state_id[state_id] = float(avg)
+        scores_by_state_id, broadcast_state_ids = _score_lookup(judge_results)
         for model, states in states_by_model.items():
-            samples_by_model[model] = {
-                s.run_index: scores_by_state_id[id(s)]
-                for s in states
-                if s.error is None and id(s) in scores_by_state_id
-            }
+            paired: dict[PairKey, float] = {}
+            seen_cells: set[tuple[str, float, str | None]] = set()
+            for s in states:
+                score = _cell_deduped_score(
+                    s, scores_by_state_id, broadcast_state_ids, seen_cells
+                )
+                if score is None:
+                    continue
+                # run_index alone repeats in every cell, so three temperatures
+                # would collapse into one entry. A broadcast verdict has no
+                # single run to name, so it pairs on the cell instead - both
+                # models produce the same key for the same cell either way.
+                run = None if id(s) in broadcast_state_ids else s.run_index
+                paired[(s.temperature, s.system_prompt, run)] = score
+            samples_by_model[model] = paired
         return samples_by_model
 
     for model, states in states_by_model.items():
         successful = [s for s in states if s.error is None]
         if metric == "latency_ms":
             samples_by_model[model] = {
-                s.run_index: float(s.latency_ms)
+                _pair_key(s): float(s.latency_ms)
                 for s in successful
                 if s.latency_ms is not None
             }
         elif metric == "output_tokens":
             samples_by_model[model] = {
-                s.run_index: float(s.output_tokens) for s in successful
+                _pair_key(s): float(s.output_tokens) for s in successful
             }
         elif metric == "cost_usd":
             samples_by_model[model] = {
-                s.run_index: float(s.cost_usd) for s in successful
+                _pair_key(s): float(s.cost_usd) for s in successful
             }
         else:
             raise ValueError(f"Unknown metric: {metric}")
@@ -877,18 +961,18 @@ def _extract_paired_metric_samples(
 
 
 def _align_paired_samples(
-    samples_a: dict[int, float],
-    samples_b: dict[int, float],
+    samples_a: dict[PairKey, float],
+    samples_b: dict[PairKey, float],
 ) -> tuple[list[float], list[float]]:
-    """Intersect on run_index, return aligned (a, b) lists sorted by index.
+    """Intersect on observation key, return aligned (a, b) lists.
 
-    Position i in the output pair corresponds to the same original
-    run_index on both models, so paired_t_test / wilcoxon_signed_rank
-    receive genuine pairs even when failures were asymmetric.
+    Position i in the output pair is the same (temperature, system prompt,
+    run) on both models, so paired_t_test / wilcoxon_signed_rank receive
+    genuine pairs even when failures were asymmetric.
     """
-    common_indices = sorted(set(samples_a.keys()) & set(samples_b.keys()))
-    aligned_a = [samples_a[i] for i in common_indices]
-    aligned_b = [samples_b[i] for i in common_indices]
+    common = sorted(samples_a.keys() & samples_b.keys(), key=_pair_sort_key)
+    aligned_a = [samples_a[k] for k in common]
+    aligned_b = [samples_b[k] for k in common]
     return aligned_a, aligned_b
 
 
