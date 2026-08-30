@@ -132,12 +132,15 @@ def _assert_contract(model: str, kwargs: dict[str, Any]) -> None:
 
 
 class TestPredicate:
-    def test_the_flagged_set_is_exactly_the_measured_twelve(self) -> None:
-        # A tripwire, not a fact about the registry's size: the flag may only
-        # be set for a model someone has actually measured a 400 from, so
-        # growing this number must be a deliberate edit. Nine in 0.1.5; the
-        # three gpt-5.6 models were measured 2026-08-07 and added.
-        assert len(REJECTING) == 12, REJECTING
+    def test_the_flagged_set_is_exactly_sixteen(self) -> None:
+        # A tripwire, not a fact about the registry's size: growing this number
+        # must be a deliberate edit. Nine in 0.1.5; the three gpt-5.6 models
+        # were measured 2026-08-07 and added.
+        #
+        # The four kimi rows were flagged from Moonshot's parameter reference,
+        # not a measured 400 - no call has ever been made against that
+        # provider.
+        assert len(REJECTING) == 16, REJECTING
 
     def test_no_entry_carries_a_false_flag(self) -> None:
         # Absent means send; an explicit False would be a confusing second way
@@ -149,7 +152,8 @@ class TestPredicate:
 
     def test_local_short_circuit_is_first(self) -> None:
         # A local id whose stripped form collides with a rejecting id must
-        # still send. This is the structural backstop for the Section 3 trap.
+        # still send. This is the structural backstop for the name collision
+        # pinned below.
         assert rejects_sampling_params("local/gpt-5") is False
         assert rejects_sampling_params("local/claude-opus-5-gguf") is False
 
@@ -157,7 +161,7 @@ class TestPredicate:
         assert rejects_sampling_params("someorg/not-in-registry-v9") is False
 
 
-# ===== 7c item 1: the flagged models omit =====
+# ===== the flagged models omit temperature =====
 
 
 @pytest.mark.parametrize("model", ANTHROPIC_REJECTING)
@@ -174,7 +178,7 @@ def test_openai_rejecting_models_omit_temperature(model: str) -> None:
     _assert_contract(model, kwargs)
 
 
-# ===== 7c item 2: unaffected models still send =====
+# ===== unaffected models still send it =====
 
 
 @pytest.mark.parametrize(
@@ -213,12 +217,12 @@ def test_unaffected_openai_compatible_models_send_temperature(model: str) -> Non
     _assert_contract(model, kwargs)
 
 
-# ===== 7c item 3: HIGHEST VALUE - local ids are never stripped =====
+# ===== local ids are never stripped before the predicate reads them =====
 
 
 @pytest.mark.parametrize("model", ["local/gpt-5", "local/claude-opus-5-gguf"])
 def test_local_ids_keep_temperature_despite_name_collision(model: str) -> None:
-    """Pins the Section 3 trap.
+    """Pins the name collision between a stripped local id and a flagged one.
 
     _transform_model rewrites these to bare `gpt-5` / `claude-opus-5-gguf` on
     the wire. If the predicate read `actual_model` instead of `model`, the
@@ -232,7 +236,7 @@ def test_local_ids_keep_temperature_despite_name_collision(model: str) -> None:
     assert kwargs["model"] == model.removeprefix("local/")
 
 
-# ===== 7c item 4: OpenRouter passthrough =====
+# ===== OpenRouter passthrough =====
 
 
 def test_openrouter_passthrough_not_in_pricing_sends_temperature() -> None:
@@ -242,7 +246,7 @@ def test_openrouter_passthrough_not_in_pricing_sends_temperature() -> None:
     assert kwargs["temperature"] == 0.7
 
 
-# ===== 7c item 5: hypothetical future ids default to SEND =====
+# ===== ids absent from the registry default to SEND =====
 
 
 @pytest.mark.parametrize("model", ["claude-opus-6", "gpt-5.7"])
@@ -257,7 +261,7 @@ def test_future_model_ids_default_to_sending_temperature(model: str) -> None:
     assert rejects_sampling_params(model) is False
 
 
-# ===== 7c item 7: the six removals =====
+# ===== the six removals =====
 
 
 class TestRemovedEntries:
@@ -290,7 +294,7 @@ class TestRemovedEntries:
         assert all(PRICING[m]["provider"] == "groq" for m in members[:2])
 
 
-# ===== 7c item 8: the JSON key, on BOTH output paths =====
+# ===== the JSON key, on BOTH output paths =====
 
 
 def _result(model: str) -> BatchResult:
@@ -372,7 +376,7 @@ class TestModelsWithoutTemperatureKey:
         assert _models_without_temperature(["someorg/sk-looks-like-a-secret"]) == []
 
 
-# ===== 7c item 6: the judge path omits AND records =====
+# ===== the judge path omits AND records =====
 
 
 class _BuilderBackedJudgeProvider(BaseProvider):
@@ -381,9 +385,9 @@ class _BuilderBackedJudgeProvider(BaseProvider):
     The other judge fakes in this suite swallow `temperature` into a recorded
     dict, so they would happily "succeed" against a model the live API rejects.
     This one routes the judge's temperature through
-    AnthropicProvider._build_kwargs, then hands the result to the Section 7d
-    contract checker - so the assertion under test is the same fact the API
-    enforces, not a restatement of the fake.
+    AnthropicProvider._build_kwargs, then hands the result to
+    `ContractCheckingProvider` above - so the assertion under test is the same
+    fact the API enforces, not a restatement of the fake.
     """
 
     name = "anthropic"
@@ -500,7 +504,7 @@ class TestJudgeDegradation:
         assert results[0].degraded_models == []
 
 
-# ===== 7c item 9: the MARKDOWN surface renders the caveat =====
+# ===== the MARKDOWN surface renders the caveat =====
 
 
 def _judged(model: str, judge_result: JudgeResult) -> BatchResult:
@@ -586,7 +590,7 @@ class TestMarkdownDegradedCaveat:
         assert "degraded" not in md
 
 
-# ===== 7c item 10: the CONSOLE surface renders text =====
+# ===== the CONSOLE surface renders text =====
 
 
 @pytest.fixture
@@ -651,11 +655,11 @@ class TestConsoleDegradedNote:
         assert note.count("claude-opus-4-8") == 1
 
 
-# ===== the Section 6 sweep warning =====
+# ===== the sweep warning =====
 
 
 class TestSweepWarning:
-    """Section 9 verifies this by hand and notes nothing else covers it.
+    """The warning has no automated check on its call sites, only on its helper.
 
     Both call sites take the same helper, so testing the helper covers compare
     and batch alike; a missing call site is what the manual step catches.
