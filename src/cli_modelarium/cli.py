@@ -6,6 +6,7 @@ import asyncio
 import functools
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import click
@@ -18,9 +19,9 @@ from rich.table import Table
 
 from cli_modelarium import __version__
 from cli_modelarium.assertions import (
+    ERROR_MARK,
     AssertionResult,
-    count_failed,
-    count_passed,
+    count_assertion_totals,
     run_assertions,
 )
 from cli_modelarium.banner import render_banner, should_show_banner
@@ -73,6 +74,7 @@ from cli_modelarium.models_registry import (
 from cli_modelarium.output_formatters import (
     BatchResult,
     render_markdown_to_console,
+    significance_temperature_caveat,
     state_to_result,
     write_csv,
     write_json,
@@ -118,6 +120,7 @@ PROVIDER_REGISTRY: dict[str, str] = {
     "dashscope": "cli_modelarium.providers.dashscope_provider:DashScopeProvider",
     "zai": "cli_modelarium.providers.zai_provider:ZAIProvider",
     "nvidia": "cli_modelarium.providers.nvidia_provider:NVIDIAProvider",
+    "moonshot": "cli_modelarium.providers.moonshot_provider:MoonshotProvider",
     "local": "cli_modelarium.providers.local_provider:LocalProvider",
 }
 
@@ -187,6 +190,22 @@ class _DefaultCommandGroup(click.Group):
             return super().resolve_command(ctx, args)
         except click.UsageError:
             if args and not args[0].startswith("-"):
+                # A prompt is not a file that exists. Forgetting the `batch`
+                # verb used to land here and send the FILENAME to the model as
+                # a prompt - a billed call, the suite never parsed, and exit 0
+                # from a command the user believed was running their gate.
+                #
+                # No extension check: `batch` accepts only .txt and .json, so
+                # gating on the extension would narrow this to exactly the
+                # cases batch would have accepted anyway, and a suite saved as
+                # .yaml would still silently run as a prompt.
+                if Path(args[0]).is_file():
+                    raise click.UsageError(
+                        f"{args[0]!r} is a file, not a prompt. "
+                        f"Did you mean: cli-modelarium batch {args[0]}\n"
+                        f"To send the path itself as a prompt, run it through "
+                        f"the verb: cli-modelarium compare {args[0]!r}"
+                    ) from None
                 args.insert(0, "compare")
                 return super().resolve_command(ctx, args)
             raise
@@ -825,7 +844,13 @@ def compare(
     help="Load a custom judge prompt template from a UTF-8 file (max 1 MB).",
 )
 @click.option(
-    "--include-reasoning", is_flag=True, help="Show each judge's reasoning in the output."
+    "--include-reasoning",
+    is_flag=True,
+    help=(
+        "Not supported on `batch` - judge reasoning is always present in JSON "
+        "output. Accepted only so that passing it reports that, rather than "
+        "failing as an unknown option. Use it on `compare`, where it works."
+    ),
 )
 @click.option(
     "--no-judge-tos",
@@ -962,6 +987,29 @@ def batch(
     # them is ambiguous, so reject upfront.
     if strict_assertions and min_pass_rate is not None:
         raise click.UsageError("--strict-assertions and --min-pass-rate are mutually exclusive.")
+    # --include-reasoning has never done anything on batch: the parameter was
+    # accepted and never read, while --help advertised it. Rejected rather
+    # than wired, because wiring it would put judge reasoning into markdown
+    # and CSV and falsify the privacy note in nine READMEs, which says those
+    # two do not carry it. Rejected rather than removed, because a documented
+    # flag disappearing into "no such option" is the worse message.
+    if include_reasoning:
+        raise click.UsageError(
+            "--include-reasoning is not supported on `batch`. Judge reasoning "
+            "is always present in JSON output (`--output-format json`), so "
+            "there is nothing for the flag to switch on. It works on `compare`."
+        )
+    # --no-assertions disarms the gate the other two flags set up, so asking
+    # for both is self-contradictory in the same way. It used to be accepted
+    # silently: failing assertions exited 0, with nothing printed to say the
+    # gate had been switched off.
+    if no_assertions and (strict_assertions or min_pass_rate is not None):
+        other = "--strict-assertions" if strict_assertions else "--min-pass-rate"
+        raise click.UsageError(
+            f"--no-assertions and {other} are mutually exclusive: "
+            f"--no-assertions skips every assertion, so there is nothing for "
+            f"{other} to gate on."
+        )
     if min_pass_rate is not None and not (0.0 <= min_pass_rate <= 1.0):
         raise click.UsageError(
             f"--min-pass-rate must be between 0.0 and 1.0 (got {min_pass_rate})."
@@ -970,14 +1018,17 @@ def batch(
     try:
         prompts = load_batch_file(file)
         if not prompts:
-            console.print(
-                Panel(
-                    f"No prompts to run - the file at {file} parsed as empty.",
-                    title="Batch",
-                    border_style="yellow",
-                )
+            # Exit 2, not 0. Nothing ran: no model was called, no output was
+            # written, and any --min-pass-rate went unapplied. Under the JSON
+            # recipe in the README stdout was 0 bytes, so a truncated suite
+            # was indistinguishable from a green run. 2 rather than 1 because
+            # there is no assertion verdict here to report - the run could not
+            # proceed, which is what the other pre-flight failures use.
+            _print_error(
+                f"No prompts to run - the file at {file} parsed as empty.\n"
+                "Nothing was evaluated."
             )
-            return
+            sys.exit(EXIT_CALL_FAILED)
 
         model_list = parse_models_arg(models)
         if not model_list:
@@ -1164,19 +1215,12 @@ def batch(
     success = len(results) - failed
     total_cost = sum(r.cost_usd for r in results if r.error is None)
 
-    # Tally assertion outcomes. count_passed excludes `error` rows from
-    # both numerator and denominator, so a missing-jsonschema doesn't
-    # poison the pass rate or trigger exit 1.
-    total_assertion_passed = 0
-    total_assertion_definitive = 0
-    total_assertion_failed = 0
-    for ar in assertion_results_per_state:
-        if ar is None:
-            continue
-        p, d = count_passed(ar)
-        total_assertion_passed += p
-        total_assertion_definitive += d
-        total_assertion_failed += count_failed(ar)
+    # Tally assertion outcomes. `error` rows are excluded from both numerator
+    # and denominator, so a missing-jsonschema doesn't poison the pass rate.
+    # They ARE counted separately, because "every assertion errored" and
+    # "there were no assertions" both leave the denominator empty and need
+    # telling apart - see AssertionTotals.
+    totals = count_assertion_totals(assertion_results_per_state)
 
     summary_parts = [
         f"[green]{success} succeeded[/green]",
@@ -1189,17 +1233,20 @@ def batch(
         summary_parts.append(
             f"[dim]judge cost ${j_cost:.6f} ({j_calls} call{'s' if j_calls != 1 else ''})[/dim]"
         )
-    if total_assertion_definitive > 0 or total_assertion_failed > 0:
-        pass_rate = (
-            total_assertion_passed / total_assertion_definitive
-            if total_assertion_definitive > 0
-            else 1.0
-        )
-        rate_color = "green" if total_assertion_failed == 0 else "red"
-        summary_parts.append(
-            f"[{rate_color}]assertions {total_assertion_passed}/{total_assertion_definitive} "
-            f"({pass_rate * 100:.0f}%)[/{rate_color}]"
-        )
+    # The old guard was `definitive > 0 or failed > 0`, which is false when
+    # every assertion errored - so the one line a reader scans said nothing
+    # about assertions on exactly the run where it mattered most.
+    if totals.configured:
+        if totals.pass_rate is not None:
+            rate_color = "green" if totals.failed == 0 else "red"
+            summary_parts.append(
+                f"[{rate_color}]assertions {totals.passed}/{totals.definitive} "
+                f"({totals.pass_rate * 100:.0f}%)[/{rate_color}]"
+            )
+        else:
+            summary_parts.append(
+                f"[red]assertions {ERROR_MARK} 0/{totals.errored} errored[/red]"
+            )
     console.print("  ".join(summary_parts))
 
     # Exit-code logic. Call failures dominate - usually they mean the user
@@ -1209,16 +1256,33 @@ def batch(
         sys.exit(EXIT_CALL_FAILED)
 
     if not no_assertions:
-        if min_pass_rate is not None:
-            # --min-pass-rate threshold mode: tolerate some failures.
-            if total_assertion_definitive > 0:
-                pass_rate = total_assertion_passed / total_assertion_definitive
-                if pass_rate < min_pass_rate:
-                    sys.exit(EXIT_ASSERTION_FAILED)
-        else:
-            # Default / --strict-assertions: ANY failure exits 1.
-            if total_assertion_failed > 0:
+        rate = totals.pass_rate
+        if rate is None:
+            # Nothing produced a verdict, so there is no rate to compare and
+            # no basis for reporting success. Two causes, two remedies, one
+            # outcome - previously both exited 0 claiming a 100% pass rate.
+            if totals.configured:
+                _print_error(
+                    f"No assertion produced a verdict: all {totals.errored} errored. "
+                    "Nothing was verified.\n"
+                    "The per-assertion errors are listed above."
+                )
                 sys.exit(EXIT_ASSERTION_FAILED)
+            if min_pass_rate is not None or strict_assertions:
+                _print_error(
+                    "No assertions to evaluate, so the requested gate cannot be "
+                    "satisfied. Nothing was verified.\n"
+                    "Add assertions to the suite, or drop --min-pass-rate / "
+                    "--strict-assertions."
+                )
+                sys.exit(EXIT_ASSERTION_FAILED)
+        elif min_pass_rate is not None:
+            # --min-pass-rate threshold mode: tolerate some failures.
+            if rate < min_pass_rate:
+                sys.exit(EXIT_ASSERTION_FAILED)
+        elif totals.failed > 0:
+            # Default / --strict-assertions: ANY failure exits 1.
+            sys.exit(EXIT_ASSERTION_FAILED)
 
     sys.exit(EXIT_OK)
 
@@ -1312,6 +1376,28 @@ def _resolve_batch_output(
     return output_path, fmt
 
 
+def _inherited_verdict(verdict: JudgeResult) -> JudgeResult:
+    """A run's copy of its cell's verdict: same scores, no cost, no call.
+
+    `_inherited` says this row is not a judge call of its own, only a copy of
+    one - the fact `total_judge_calls` needs and cannot recover from the row
+    itself, since a zero cost is also what genuinely-free judge models report.
+    It is narrower than `_broadcast`, which is true of the billed row as well:
+    the statistics need to know a verdict is shared across a cell, the call
+    count needs to know which single row paid for it. Both are documented on
+    `JudgeResult`, where a reader meets them.
+    """
+    copy = replace(
+        verdict,
+        judges=[replace(j, cost_usd=0.0) for j in verdict.judges],
+        skipped_models=list(verdict.skipped_models),
+        degraded_models=list(verdict.degraded_models),
+    )
+    copy._broadcast = True  # type: ignore[attr-defined]
+    copy._inherited = True  # type: ignore[attr-defined]
+    return copy
+
+
 async def _run_mode_only_judging(
     *,
     states: list[StreamState],
@@ -1372,14 +1458,40 @@ async def _run_mode_only_judging(
         key: verdict for (key, _), verdict in zip(representatives, cell_verdicts, strict=True)
     }
 
-    # Expand: every state in a cell gets that cell's single verdict.
-    return [
-        verdict_by_cell.get(
-            (s.model, s.temperature, s.system_prompt),
-            JudgeResult(),
-        )
-        for s in states
-    ]
+    # Mark the verdicts as broadcast BEFORE expanding, so every consumer can
+    # tell "this row was judged" from "this row inherited its cell's verdict".
+    # Nothing else records that: `_state_id` distinguishes the two only while
+    # the objects stay aliased, because the tag is then overwritten down to one
+    # surviving state per cell. Anything that de-aliases them - copying to fix
+    # the duplicated cost, say - destroys that signal, so it is recorded here
+    # rather than inferred downstream. See `JudgeResult` for what it means.
+    for verdict in verdict_by_cell.values():
+        verdict._broadcast = True  # type: ignore[attr-defined]
+
+    # Expand: every state in a cell gets that cell's single verdict. The first
+    # run of each cell keeps the verdict that was actually paid for; the rest
+    # get zero-cost copies.
+    #
+    # Handing the SAME object to all N runs made one call bill N times. Three
+    # separate sums of `judges[].cost_usd` - `total_judge_cost`, and one in
+    # each of the JSON and markdown formatters - feed five reported totals,
+    # and not one of them can see that the rows share a call. At --runs 20 the
+    # reported judge spend was 20x the truth. Zeroing the copies here fixes
+    # every one of them, and keeps the per-row score and reasoning that make
+    # the inherited verdict worth showing.
+    billed_cells: set[tuple[str, float, str | None]] = set()
+    expanded: list[JudgeResult] = []
+    for s in states:
+        key = (s.model, s.temperature, s.system_prompt)
+        verdict = verdict_by_cell.get(key)
+        if verdict is None:
+            expanded.append(JudgeResult())
+        elif key in billed_cells:
+            expanded.append(_inherited_verdict(verdict))
+        else:
+            billed_cells.add(key)
+            expanded.append(verdict)
+    return expanded
 
 
 def _states_to_compare_results(
@@ -1474,9 +1586,13 @@ def _emit_batch_results(
 ) -> None:
     """Dispatch to the right writer/renderer based on resolved format.
 
-    v0.1.3: significance_results, stats_by_cell_cis, mcnemar_results, and
-    methodology flow to ALL formatters (not just JSON) so CSV/Markdown
-    also render the new fields.
+    JSON and markdown both receive every run-level extra, the temperature
+    caveat included - markdown is the format that gets written to a file and
+    circulated, so the reader of a p-value there is the least likely to have
+    seen the console warning that qualifies it. CSV receives only
+    stats_by_cell_cis: it is a per-row export and `_format_csv` has no
+    parameter for the others, so a significance verdict written to CSV is
+    computed and discarded.
     """
     if output_path is None:
         # Stdout: only markdown is rendered natively; csv/json get printed raw.
@@ -1489,6 +1605,8 @@ def _emit_batch_results(
                 stats_by_cell_cis=stats_by_cell_cis,
                 mcnemar_results=mcnemar_results,
                 methodology=methodology,
+                models_without_temperature=models_without_temperature,
+                significance_temperature_mixed=significance_temperature_mixed,
             )
         elif output_fmt == "csv":
             from cli_modelarium.output_formatters import _format_csv
@@ -1548,6 +1666,8 @@ def _emit_batch_results(
             stats_by_cell_cis=stats_by_cell_cis,
             mcnemar_results=mcnemar_results,
             methodology=methodology,
+            models_without_temperature=models_without_temperature,
+            significance_temperature_mixed=significance_temperature_mixed,
         )
     else:
         _print_error(f"Unsupported output format: {output_fmt!r}")
@@ -2095,17 +2215,6 @@ def _sweep_caveat(affected: list[str], temperature_count: int) -> str:
     )
 
 
-def _significance_caveat(omitted: list[str]) -> str:
-    """The significance half: the samples being compared are not comparable."""
-    return (
-        f"{', '.join(omitted)} ran at the provider default temperature, which "
-        f"you did not choose - the provider rejects the field, so it is omitted. "
-        f"The models in this run were therefore not sampled under identical "
-        f"conditions, and a significance result across them may reflect that "
-        f"difference rather than a difference in model quality."
-    )
-
-
 def _models_without_pricing(models: list[str]) -> list[str]:
     """Registered models whose provider publishes no per-token rate.
 
@@ -2213,7 +2322,7 @@ def _warn_temperature_conditions(
     if len(temperatures) >= 2 and omitted:
         parts.append(_sweep_caveat(omitted, len(temperatures)))
     if significance_runs and omitted and honoured:
-        parts.append(_significance_caveat(omitted))
+        parts.append(significance_temperature_caveat(omitted))
     if not parts:
         return
     console.print(
@@ -2618,18 +2727,7 @@ def _display_results(
 
     console.print(table)
 
-    # Degraded-judge caveat. The console user is the primary audience, so this
-    # renders real text rather than reusing the Score-column plumbing, which
-    # never displayed skipped_models at all.
-    if judge_results is not None:
-        degraded = sorted({m for jr in judge_results for m in jr.degraded_models})
-        if degraded:
-            console.print(
-                f"[yellow]Note: judge determinism not guaranteed for "
-                f"{', '.join(degraded)}. These models reject a temperature "
-                f"setting, so the judge ran at the provider default instead of "
-                f"0.0 and its scores are not reproducible run to run.[/yellow]"
-            )
+    _print_degraded_judge_notice(judge_results)
     console.print()
 
     # Per-model output blocks. When multiple SPs are in play, identify which
@@ -2829,6 +2927,12 @@ def _display_results_with_runs(
         table.add_row(*row)
 
     console.print(table)
+
+    # Degraded-judge caveat, same as the single-run display. It was missing
+    # here, which is the run where it matters more: --runs N is what a user
+    # reaches for to measure reproducibility, and this is the notice saying
+    # the judge's own scores are not reproducible.
+    _print_degraded_judge_notice(judge_results)
     console.print()
 
     # Per-cell expanded view: list every run's output beneath its cell header.
@@ -3008,9 +3112,11 @@ def _display_significance(significance_results: list) -> None:
                 if r.effect_size is not None
                 else ""
             )
+            avg_a = f"{r.mean_a:.3f}" if r.mean_a is not None else "no data"
+            avg_b = f"{r.mean_b:.3f}" if r.mean_b is not None else "no data"
             console.print(
-                f"  {r.model_a} (avg {r.mean_a:.3f}) vs "
-                f"{r.model_b} (avg {r.mean_b:.3f}): "
+                f"  {r.model_a} (avg {avg_a}) vs "
+                f"{r.model_b} (avg {avg_b}): "
                 f"p={p_display:.4f}{sig_marker}{d_text}"
             )
         return
@@ -3074,6 +3180,28 @@ def _display_significance(significance_results: list) -> None:
     console.print("[dim]Full matrix available in JSON output.[/dim]")
 
 
+def _print_degraded_judge_notice(judge_results: list[JudgeResult] | None) -> None:
+    """Warn that a judge's scores are not reproducible, if any judge degraded.
+
+    The console user is the primary audience, so this renders real text rather
+    than reusing the Score-column plumbing, which never displayed
+    skipped_models at all. Shared by the single-run and multi-run displays: it
+    lived in only one of them, and the multi-run one is where a reader is
+    explicitly measuring reproducibility.
+    """
+    if judge_results is None:
+        return
+    degraded = sorted({m for jr in judge_results for m in jr.degraded_models})
+    if not degraded:
+        return
+    console.print(
+        f"[yellow]Note: judge determinism not guaranteed for "
+        f"{', '.join(degraded)}. These models reject a temperature "
+        f"setting, so the judge ran at the provider default instead of "
+        f"0.0 and its scores are not reproducible run to run.[/yellow]"
+    )
+
+
 def _score_cell_for_compare(jr: JudgeResult) -> str:
     """Render the Score column cell for the compare command's results table."""
     if not jr.judges:
@@ -3084,8 +3212,14 @@ def _score_cell_for_compare(jr: JudgeResult) -> str:
     if len(jr.judges) == 1 and successful:
         # Single judge: just the score.
         return str(successful[0].score)
-    # Panel: average + count.
+    # Panel: average + how many of the panel it was taken over. A bare "(1)"
+    # after a three-judge average is indistinguishable from a single-judge
+    # panel that answered, so two of three judges failing to parse read as a
+    # complete result. std_dev is None at n=1 for the same reason and says
+    # nothing on this line, so the count is the only place it can show.
     if jr.average_score is not None:
+        if len(successful) < len(jr.judges):
+            return f"{jr.average_score:.1f} ({len(successful)} of {len(jr.judges)})"
         return f"{jr.average_score:.1f} ({len(successful)})"
     return "[red]N/A[/red]"
 
@@ -3103,11 +3237,18 @@ def _risk_cell_for_compare(jr: JudgeResult) -> str:
     if not jr.judges:
         return "[dim]-[/dim]"
     successful = [j for j in jr.judges if j.score is not None and j.risk_level]
-    if not successful:
-        return "[red]N/A[/red]"
 
     risk = jr.aggregated_risk_level or "?"
     color = _RISK_COLOR.get(risk, "magenta")
+
+    if not successful:
+        # A judge can classify the risk and still return no parsable score.
+        # `aggregated_risk_level` - the value JSON reports - only needs the
+        # classification, so the console said "N/A" for a row the JSON called
+        # High. Show the risk; say only the score is missing.
+        if jr.aggregated_risk_level is not None:
+            return f"[{color}]{risk}[/{color}] (no score)"
+        return "[red]N/A[/red]"
 
     if len(successful) == 1:
         s = successful[0]
