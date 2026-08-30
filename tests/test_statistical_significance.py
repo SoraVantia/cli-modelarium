@@ -290,6 +290,24 @@ class TestComputePairwiseSignificance:
         assert results[0].p_value is None
         assert not results[0].significant_at_threshold
 
+    def test_empty_sample_reports_no_mean_rather_than_zero(self) -> None:
+        """0.0 is a real mean, so it cannot stand in for "nothing measured".
+
+        A model whose every run failed used to be reported at "avg 0.000"
+        next to a working one - the worst possible score, indistinguishable
+        from a genuine one, on a line whose whole job is comparison.
+        """
+        states = {
+            "a": [_MockState(model="a", latency_ms=v) for v in (100, 110, 120)],
+            "b": [],
+        }
+
+        results = compute_pairwise_significance(states, None)
+
+        assert results[0].n_b == 0
+        assert results[0].mean_b is None
+        assert results[0].mean_a == pytest.approx(110.0)
+
     def test_zero_variance_equal_means_trivial(self) -> None:
         states = {
             "a": [_MockState(model="a", latency_ms=100.0) for _ in range(5)],
