@@ -414,9 +414,15 @@ class TestForceLarge:
 
 
 class TestEmptyBatch:
-    def test_empty_file_exits_clean(
+    def test_empty_file_exits_non_zero_and_makes_no_calls(
         self, fake_provider: _RecordingProvider, tmp_path: Path
     ) -> None:
+        """An empty suite evaluated nothing, so it must not report success.
+
+        It used to exit 0, which made a truncated or mis-generated suite
+        indistinguishable from a green run - and silently skipped any
+        --min-pass-rate the caller had set.
+        """
         prompts_file = tmp_path / "empty.txt"
         prompts_file.write_text("", encoding="utf-8")
 
@@ -426,8 +432,26 @@ class TestEmptyBatch:
             ["batch", str(prompts_file), "--models", "gpt-5.5"],
         )
 
-        assert result.exit_code == 0
+        assert result.exit_code == 2
         assert "no prompts" in result.output.lower() or "empty" in result.output.lower()
+        assert fake_provider.calls == []
+
+    def test_empty_file_does_not_silently_satisfy_a_gate(
+        self, fake_provider: _RecordingProvider, tmp_path: Path
+    ) -> None:
+        prompts_file = tmp_path / "empty.json"
+        prompts_file.write_text("[]", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli_main,
+            [
+                "batch", str(prompts_file), "--models", "gpt-5.5",
+                "--min-pass-rate", "0.99",
+            ],
+        )
+
+        assert result.exit_code != 0, result.output
         assert fake_provider.calls == []
 
 
@@ -457,3 +481,136 @@ class TestMatrixExpansion:
         assert result.exit_code == 0, result.output
         # 2 prompts x 2 models x 2 temps = 8
         assert len(fake_provider.calls) == 8
+
+
+# ===== gate bypasses: a run that evaluated nothing must not report success =====
+
+
+class TestForgottenBatchVerb:
+    """`cli-modelarium suite.json --models X` used to send the FILENAME to the
+    model as a prompt, bill the call, never parse the suite, and exit 0.
+    """
+
+    def test_bare_filename_is_rejected_and_reaches_no_provider(
+        self, fake_provider: _RecordingProvider, tmp_path: Path
+    ) -> None:
+        suite = tmp_path / "eval_suite.json"
+        suite.write_text(
+            json.dumps([{"id": "p1", "prompt": "x", "assertions": []}]), encoding="utf-8"
+        )
+
+        result = CliRunner().invoke(cli_main, [str(suite), "--models", "gpt-5.5"])
+
+        assert result.exit_code == 2, result.output
+        assert "is a file, not a prompt" in result.output
+        assert "cli-modelarium batch" in result.output
+        assert fake_provider.calls == []
+
+    def test_any_existing_file_is_rejected_not_just_batch_extensions(
+        self, fake_provider: _RecordingProvider, tmp_path: Path
+    ) -> None:
+        """No extension check: a suite saved as .yaml would otherwise still
+        run silently as a prompt.
+        """
+        suite = tmp_path / "eval_suite.yaml"
+        suite.write_text("- prompt: x\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli_main, [str(suite), "--models", "gpt-5.5"])
+
+        assert result.exit_code == 2, result.output
+        assert fake_provider.calls == []
+
+    def test_bare_prompt_shorthand_still_works(
+        self, fake_provider: _RecordingProvider
+    ) -> None:
+        """The feature the rewrite exists for. 89 test invocations rely on it."""
+        result = CliRunner().invoke(
+            cli_main,
+            ["Explain quantum computing in one sentence", "--models", "gpt-5.5", "--no-stream"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert len(fake_provider.calls) == 1
+
+    def test_a_prompt_naming_a_real_file_can_still_be_forced(
+        self, fake_provider: _RecordingProvider, tmp_path: Path
+    ) -> None:
+        """The escape hatch the error message names, for the rare prompt that
+        happens to match a path on disk.
+        """
+        collide = tmp_path / "README.md"
+        collide.write_text("# hi\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            cli_main, ["compare", str(collide), "--models", "gpt-5.5", "--no-stream"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert len(fake_provider.calls) == 1
+        assert fake_provider.calls[0]["prompt"] == str(collide)
+
+
+class TestNoAssertionsConflictsWithGateFlags:
+    """--no-assertions skips every assertion, so gating on the result is
+    self-contradictory. It used to be accepted: failing assertions exited 0
+    with no warning that the gate had been switched off.
+    """
+
+    @pytest.mark.parametrize(
+        "gate", [["--min-pass-rate", "0.99"], ["--strict-assertions"]]
+    )
+    def test_rejected_before_any_call(
+        self, fake_provider: _RecordingProvider, tmp_path: Path, gate: list[str]
+    ) -> None:
+        prompts = tmp_path / "p.json"
+        prompts.write_text(
+            json.dumps(
+                [{"id": "p1", "prompt": "x", "assertions": [{"type": "contains", "value": "NOPE"}]}]
+            ),
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            cli_main,
+            ["batch", str(prompts), "--models", "gpt-5.5", "--no-assertions", *gate],
+        )
+
+        assert result.exit_code == 2, result.output
+        assert "mutually exclusive" in result.output
+        assert fake_provider.calls == []
+
+
+class TestIncludeReasoningRejectedOnBatch:
+    """The flag was accepted and never read, while --help advertised it.
+
+    Rejected rather than wired: wiring it would put judge reasoning into
+    markdown and CSV and falsify the privacy note in nine READMEs. Rejected
+    rather than removed: a documented flag collapsing into "no such option"
+    is the worse message.
+    """
+
+    def test_batch_rejects_it_before_any_call(
+        self, fake_provider: _RecordingProvider, tmp_path: Path
+    ) -> None:
+        prompts = tmp_path / "p.json"
+        _write_json(prompts, [{"id": "p1", "prompt": "x"}])
+
+        result = CliRunner().invoke(
+            cli_main,
+            [
+                "batch", str(prompts), "--models", "gpt-5.5",
+                "--judge", "claude-opus-4-7", "--no-judge-tos",
+                "--include-reasoning",
+            ],
+        )
+
+        assert result.exit_code == 2, result.output
+        assert "not supported on `batch`" in result.output
+        assert "It works on `compare`" in result.output
+        assert fake_provider.calls == []
+
+    def test_the_flag_is_still_advertised_rather_than_unknown(self) -> None:
+        result = CliRunner().invoke(cli_main, ["batch", "--help"])
+
+        assert result.exit_code == 0
+        assert "--include-reasoning" in result.output
