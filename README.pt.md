@@ -9,7 +9,7 @@ Nota: Este README é traduzido para acessibilidade. A própria ferramenta CLI Cl
 
 > Nota: sete seções existem apenas no README em inglês — *Reproducibility analysis*, *Statistical significance testing*, *Bootstrap confidence intervals*, *Paired tests for same-prompt comparisons*, *McNemar's test for hallucination significance*, *Headless Linux servers* e *More examples*. Os recursos em si estão totalmente disponíveis; o que falta aqui é apenas a documentação deles. Consulte [README.md](https://github.com/SoraVantia/cli-modelarium/blob/main/README.md).
 
-> Compare saídas de LLM lado a lado do seu terminal - 11 provedores de nuvem + modelos locais, com streaming paralelo, avaliação em lote, pontuação LLM-as-judge, detecção de alucinação e asserções prontas para CI/CD.
+> Compare saídas de LLM lado a lado do seu terminal - 12 provedores de nuvem + modelos locais, com streaming paralelo, avaliação em lote, pontuação LLM-as-judge, detecção de alucinação e asserções prontas para CI/CD.
 
 [![CI](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
@@ -57,9 +57,9 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ## Recursos
 
-### 🤖 Provedores (11 na nuvem + locais ilimitados)
+### 🤖 Provedores (12 na nuvem + locais ilimitados)
 
-- **Provedores de nuvem:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM), NVIDIA (NIM)
+- **Provedores de nuvem:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM), NVIDIA (NIM), Moonshot AI (Kimi)
 - **Modelos locais:** Ollama, LM Studio, vLLM, llama.cpp - qualquer servidor compatível com OpenAI em execução no localhost
 - Combine modelos locais e em nuvem na mesma comparação
 - Escolha qualquer ID de modelo registrado por chamada - sem se limitar aos atalhos de grupo integrados
@@ -69,7 +69,7 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - Exibição ao vivo token por token em todos os modelos simultaneamente
 - Rastreamento de Time-to-First-Token (TTFT) por modelo
 - Veja qual modelo termina primeiro, observe as saídas divergirem em tempo real
-- Streams de todos os 11 provedores (SSE por baixo)
+- Streams de todos os 12 provedores (SSE por baixo)
 
 <p align="center">
   <img src="docs/assets/cli-modelarium-comparison-demo.gif" alt="Demonstração do cli-modelarium no terminal: três modelos transmitem suas respostas ao mesmo prompt em paralelo e, em seguida, uma tabela de comparação mostra o Time-to-First-Token, a latência, as contagens de tokens e o custo por modelo." width="718">
@@ -125,12 +125,13 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ### 🛡️ Tratamento de limites de taxa
 
-- Limites de concorrência por provedor (padrão 5) respeitam todas as baselines de tier
+- Limites de concorrência por provedor (padrão 5) - um único valor para todos os provedores, confira-o com o seu próprio tier
 - Retentativa automática de 429 com backoff exponencial
 - 529 "overloaded" do Anthropic tratado separadamente dos limites de taxa
 - Flag `--concurrency` para usuários avançados em tiers superiores
 - Falha graciosa por modelo (outros modelos continuam)
 - Os limites de taxa do tier gratuito do DashScope e do Qwen carro-chefe (qwen3.7-max) são mais restritos que os da maioria dos provedores; reduza `--concurrency` se você encontrar erros 429.
+- A Moonshot exige uma recarga mínima de 1 $ antes de qualquer uso: não há tier gratuito. O Tier0 é 1 requisição simultânea, 3 requisições por minuto e 1,5 M de tokens por dia; uma recarga acumulada de 10 $ leva ao Tier1. Reduza `--concurrency` no Tier0.
 
 ### 🌐 Multiplataforma
 
@@ -242,7 +243,7 @@ O comando sai com código 1 se a taxa de aprovação cair abaixo de 90%, fazendo
 | Código | Significado |
 |--------|-------------|
 | `0` | Sucesso. |
-| `1` | Falha de asserção - uma ou mais asserções não passaram. Apenas `batch`; `compare` não tem asserções. |
+| `1` | Falha de asserção - uma ou mais asserções não passaram, ou uma execução do `batch` não verificou nada. Apenas o `batch` emite um veredicto de asserção; o `compare` ainda pode sair com `1` num erro inesperado. |
 | `2` | A execução não pôde ser concluída. |
 
 O código `2` abrange várias causas distintas e **não distingue entre elas**: uma chave de API ausente, um modelo desconhecido, um modelo descontinuado, um erro do provedor, um limite de custo excedido, um arquivo de lote malformado, uma combinação de flags rejeitada, um conflito no arquivo de saída ou um limite de tamanho de lote excedido.
@@ -266,7 +267,7 @@ fi
 
 `--output-format json` é obrigatório: a saída padrão não inclui nenhum campo de erro legível por máquina. Observe que as falhas que ocorrem *antes* de qualquer chamada ao modelo (chave ausente, modelo desconhecido, arquivo de lote incorreto) não produzem JSON algum; nesses casos a mensagem no console é o único sinal.
 
-**Nota de privacidade:** todos os formatos de saída - JSON, CSV e Markdown - incluem o prompt completo e a resposta completa do modelo de cada resultado, junto com quaisquer mensagens de erro do provedor. O JSON inclui ainda o texto de raciocínio de cada juiz; `--include-reasoning` controla apenas a exibição no console, não o arquivo, e CSV e Markdown não o contêm. Trate qualquer arquivo de saída como sensível antes de fazer commit ou enviá-lo como artefato público de CI.
+**Nota de privacidade:** todos os formatos de saída - JSON, CSV e Markdown - incluem o prompt completo e a resposta completa do modelo de cada resultado, junto com quaisquer mensagens de erro do provedor. O JSON inclui ainda o texto de raciocínio de cada juiz; `--include-reasoning` controla apenas a exibição no console, não o arquivo, e CSV e Markdown não o contêm. Trate qualquer arquivo de saída como sensível antes de fazer commit ou enviá-lo como artefato público de CI. As condições de retenção de dados e de treinamento variam entre provedores, esta ferramenta não afirma nada a respeito de nenhuma delas, e convém verificar os termos de cada provedor que você configurar.
 
 ## Configuração
 
@@ -330,6 +331,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, etc.; modelos Qwen selecionados, Internacional/Singapura) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air, etc.; compatível com OpenAI, endpoint internacional) | ✅ | ✅ | ✅ |
 | NVIDIA NIM (9 IDs registrados: Nemotron, Gemma 4, Mistral Nemotron, MiniMax M3, Laguna, Llama 3.1) | ✅ | ✅ | Sem tarifa publicada |
+| Moonshot AI / Kimi (4 IDs registrados: K3, K2.7 Code, K2.7 Code HighSpeed, K2.6) | ✅ | ✅ | ✅ |
 | **Local: Ollama** | ❌ | ✅ | Gratuito |
 | **Local: LM Studio** | ❌ | ✅ | Gratuito |
 | **Local: vLLM** | ❌ | ✅ | Gratuito |
@@ -417,7 +419,7 @@ LLMs são não determinísticos em temperatura > 0 - executar novamente o mesmo 
 Para tirar conclusões mais confiáveis:
 - Use `--runs 5` (ou mais) para executar automaticamente cada comparação N vezes e ver resumos estatísticos: latência média/mediana, coeficiente de variação, saída modal e diversidade de saída. Um coeficiente de variação abaixo de 0,05 indica comportamento estável do modelo entre as execuções.
 - Para a análise de consistência de alucinações, combine `--runs` com `--check-hallucination` para ver com que frequência o modelo produz alucinações ao longo de várias execuções (a taxa de alucinação).
-- Use `--temperatures 0` para saídas mais determinísticas. Alguns modelos não aceitam nenhuma configuração de temperatura - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra` e `gpt-5.6-luna`. A ferramenta omite o campo para esses modelos para que a chamada ainda funcione, e eles são executados com o valor padrão do provedor.
+- Use `--temperatures 0` para saídas mais determinísticas. Alguns modelos não aceitam nenhuma configuração de temperatura - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.7-code-highspeed` e `kimi-k2.6`. A ferramenta omite o campo para esses modelos para que a chamada ainda funcione, e eles são executados com o valor padrão do provedor.
 - Compare entre múltiplos prompts, não apenas um
 - Use a flag `--output json` para salvar execuções para análise sistemática (com `--runs > 1` o JSON inclui agregados `stats_by_cell` por célula)
 
