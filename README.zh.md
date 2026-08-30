@@ -9,7 +9,7 @@
 
 > 注意：以下七个章节仅存在于英文 README 中 — *Reproducibility analysis*、*Statistical significance testing*、*Bootstrap confidence intervals*、*Paired tests for same-prompt comparisons*、*McNemar's test for hallucination significance*、*Headless Linux servers*、*More examples*。功能本身均可正常使用，此处缺少的只是它们的说明。请参阅 [README.md](https://github.com/SoraVantia/cli-modelarium/blob/main/README.md)。
 
-> 在终端中并排比较 LLM 输出 - 11 个云服务提供商 + 本地模型，支持并行流式传输、批量评估、LLM-as-judge 评分、幻觉检测和 CI/CD 就绪的断言。
+> 在终端中并排比较 LLM 输出 - 12 个云服务提供商 + 本地模型，支持并行流式传输、批量评估、LLM-as-judge 评分、幻觉检测和 CI/CD 就绪的断言。
 
 [![CI](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
@@ -57,9 +57,9 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ## 特性
 
-### 🤖 提供商（11 个云端 + 无限本地）
+### 🤖 提供商（12 个云端 + 无限本地）
 
-- **云服务提供商:** OpenAI、Anthropic、Google (Gemini)、xAI (Grok)、DeepSeek、Mistral、Groq、OpenRouter、Alibaba (DashScope)、Z.AI (GLM)、NVIDIA (NIM)
+- **云服务提供商:** OpenAI、Anthropic、Google (Gemini)、xAI (Grok)、DeepSeek、Mistral、Groq、OpenRouter、Alibaba (DashScope)、Z.AI (GLM)、NVIDIA (NIM), Moonshot AI (Kimi)
 - **本地模型:** Ollama、LM Studio、vLLM、llama.cpp - 任何在 localhost 上运行的 OpenAI 兼容服务器
 - 在同一比较中混合使用本地和云模型
 - 每次调用可选择任何已注册的模型 ID - 不限于内置的分组快捷方式
@@ -69,7 +69,7 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - 同时跨所有模型逐令牌实时显示
 - 每个模型的 Time-to-First-Token (TTFT) 跟踪
 - 查看哪个模型首先完成，实时观察输出分歧
-- 来自所有 11 个提供商的流（底层使用 SSE）
+- 来自所有 12 个提供商的流（底层使用 SSE）
 
 <p align="center">
   <img src="docs/assets/cli-modelarium-comparison-demo.gif" alt="cli-modelarium 终端演示：三个模型并行实时流式传输对同一提示的响应，随后比较表显示每个模型的 Time-to-First-Token、延迟、令牌数和成本。" width="718">
@@ -125,12 +125,13 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ### 🛡️ 速率限制处理
 
-- 每个提供商的并发限制（默认 5）尊重所有层级基线
+- 每个提供商的并发限制（默认 5）- 所有提供商共用同一个值，请对照你自己的层级确认
 - 自动 429 重试，带指数退避
 - Anthropic 的 529 "overloaded" 与速率限制分开处理
 - 为较高层级的高级用户提供 `--concurrency` 标志
 - 每个模型的优雅失败（其他模型继续）
 - DashScope 免费层级和旗舰 Qwen (qwen3.7-max) 的速率限制比大多数提供商更严格；如果遇到 429，请降低 `--concurrency`
+- Moonshot 在使用前需要至少充值 1 美元，没有免费层级。Tier0 为 1 个并发请求、每分钟 3 次请求、每天 150 万 tokens；累计充值 10 美元升至 Tier1。在 Tier0 上请调低 `--concurrency`。
 
 ### 🌐 跨平台
 
@@ -242,7 +243,7 @@ cli-modelarium "Summarize the key features of microservices architecture" \
 | 代码 | 含义 |
 |------|------|
 | `0` | 成功。 |
-| `1` | 断言失败——一个或多个断言未通过。仅限 `batch`；`compare` 没有断言。 |
+| `1` | 断言失败——一个或多个断言未通过，或某次 `batch` 运行什么都没有验证。只有 `batch` 会给出断言结论；`compare` 在发生意外错误时仍可能以 `1` 退出。 |
 | `2` | 运行未能完成。 |
 
 代码 `2` 涵盖多种不同的原因，并且**不区分它们**：缺少 API 密钥、未知模型、已停用的模型、提供商错误、超出成本上限、格式错误的批处理文件、被拒绝的标志组合、输出文件冲突，或超出批处理大小上限。
@@ -266,7 +267,7 @@ fi
 
 `--output-format json` 是必需的：默认输出不含任何机器可读的错误字段。请注意，在调用任何模型*之前*发生的失败（缺少密钥、未知模型、批处理文件有误）根本不会生成 JSON；此时控制台消息是唯一的信号。
 
-**隐私提示：** JSON、CSV 和 Markdown 每种输出格式都会嵌入每条结果的完整提示词和完整模型响应，以及提供商的任何错误消息。JSON 还会嵌入每个评判模型的推理文本；`--include-reasoning` 仅控制控制台显示，不影响文件，CSV 和 Markdown 不包含该内容。在提交输出文件或将其作为公开 CI 产物上传之前，请将其视为敏感信息。
+**隐私提示：** JSON、CSV 和 Markdown 每种输出格式都会嵌入每条结果的完整提示词和完整模型响应，以及提供商的任何错误消息。JSON 还会嵌入每个评判模型的推理文本；`--include-reasoning` 仅控制控制台显示，不影响文件，CSV 和 Markdown 不包含该内容。在提交输出文件或将其作为公开 CI 产物上传之前，请将其视为敏感信息。 数据保留和训练条款因提供商而异，本工具不对其中任何一项作出声明，请查阅你所配置的每个提供商的条款。
 
 ## 配置
 
@@ -330,6 +331,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder 等；精选 Qwen 模型，国际/新加坡) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2、GLM-4.7、GLM-4.5 Air 等；OpenAI 兼容，海外端点) | ✅ | ✅ | ✅ |
 | NVIDIA NIM (已注册的 9 个 ID：Nemotron、Gemma 4、Mistral Nemotron、MiniMax M3、Laguna、Llama 3.1) | ✅ | ✅ | 无公开费率 |
+| Moonshot AI / Kimi (4 个已注册 ID：K3、K2.7 Code、K2.7 Code HighSpeed、K2.6) | ✅ | ✅ | ✅ |
 | **本地: Ollama** | ❌ | ✅ | 免费 |
 | **本地: LM Studio** | ❌ | ✅ | 免费 |
 | **本地: vLLM** | ❌ | ✅ | 免费 |
@@ -417,7 +419,7 @@ LLM 在温度 > 0 时是非确定性的 - 重新运行相同的提示可能产�
 要得出更可靠的结论:
 - 使用 `--runs 5`（或更高）自动将每个比较运行 N 次并查看统计摘要：平均/中位数延迟、变异系数、众数输出和输出多样性。变异系数低于 0.05 表示模型在多次运行中行为稳定。
 - 若要分析幻觉一致性，请将 `--runs` 与 `--check-hallucination` 结合使用，以查看模型在多次运行中产生幻觉的频率（幻觉率）。
-- 使用 `--temperatures 0` 获得更确定性的输出。部分模型完全不接受温度设置 - `claude-opus-4-7`、`claude-opus-4-8`、`claude-opus-5`、`claude-sonnet-5`、`claude-fable-5`、`o3`、`o4-mini`、`gpt-5`、`gpt-5.5`、`gpt-5.6-sol`、`gpt-5.6-terra` 和 `gpt-5.6-luna`。该工具会为这些模型省略该字段，从而使调用仍能成功，它们将以提供商的默认值运行。
+- 使用 `--temperatures 0` 获得更确定性的输出。部分模型完全不接受温度设置 - `claude-opus-4-7`、`claude-opus-4-8`、`claude-opus-5`、`claude-sonnet-5`、`claude-fable-5`、`o3`、`o4-mini`、`gpt-5`、`gpt-5.5`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`kimi-k3`、`kimi-k2.7-code`、`kimi-k2.7-code-highspeed` 和 `kimi-k2.6`。该工具会为这些模型省略该字段，从而使调用仍能成功，它们将以提供商的默认值运行。
 - 跨多个提示比较，而不仅仅是一个
 - 使用 `--output json` 标志保存运行结果以进行系统分析（当 `--runs > 1` 时，JSON 包含按单元格的 `stats_by_cell` 聚合）
 
