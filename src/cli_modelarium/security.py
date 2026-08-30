@@ -62,6 +62,13 @@ KEY_PATTERNS: dict[str, re.Pattern[str]] = {
     # usual key characters. Shape-only check (length floor matches the others).
     "zai": re.compile(r"^[A-Za-z0-9._-]{20,}$"),
     "nvidia": re.compile(r"^nvapi-[A-Za-z0-9_-]{20,}$"),
+    # Byte-identical to `deepseek` and `dashscope`. Moonshot documents an
+    # `sk-` prefix and no length or character class, and no key was ever
+    # obtained to measure one. Validation is per-provider - `validate_key`
+    # matches this pattern and no other - so sharing a shape weakens
+    # nothing. Inventing a stricter one would reject a legitimate key at
+    # `save_key`, failing closed on the one thing nobody could check.
+    "moonshot": re.compile(r"^sk-[A-Za-z0-9_-]{20,}$"),
 }
 
 # Secondary environment-variable aliases, consulted ONLY after the primary
