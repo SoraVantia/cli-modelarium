@@ -45,7 +45,7 @@ classifiers = [
 ]
 dependencies = [
     "openai~=2.38",
-    "anthropic>=0.104,<0.200",
+    "anthropic>=1.2.0,<1.3",
     "google-genai~=2.6",
     # The 2.4.7 floor excludes 2.4.6, withdrawn from PyPI after a malicious release; do not lower it.
     "mistralai>=2.4.7,<2.10.0",
