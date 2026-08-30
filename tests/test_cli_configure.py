@@ -48,6 +48,7 @@ VALID_KEYS = {
     "google": "AIzaSyNOT_A_REAL_KEY-test_fixture_000000",
     "groq": "gsk_NOT_A_REAL_KEY_test_fixture_00",
     "mistral": "abcdefghij1234567890abcd",
+    "moonshot": "sk-NOT_A_REAL_KEY_test_fixture_00",
     "nvidia": "nvapi-NOT_A_REAL_KEY_test_fixture_1",
     "openai": "sk-proj-NOT_A_REAL_KEY_test_fixture_00",
     "openrouter": "sk-or-NOT_A_REAL_KEY_test_fixture_0",
@@ -188,7 +189,10 @@ class TestCountsAreDistinguishable:
         result, _ = _run({"anthropic": VALID_KEYS["anthropic"], "openai": BAD_KEY})
         assert "1 configured" in result.output
         assert "1 invalid" in result.output
-        assert "9 skipped" in result.output
+        # Derived, not written as a literal: this said "9 skipped" while eleven
+        # providers were prompted, which is exactly the staleness the file's
+        # docstring forbids two paragraphs above it.
+        assert f"{len(PROVIDERS) - 2} skipped" in result.output
 
 
 class TestMissingBackend:
