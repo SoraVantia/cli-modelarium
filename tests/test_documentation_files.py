@@ -71,14 +71,16 @@ class TestGitHubConfig:
         text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         parsed = _yaml.safe_load(text)
         # Minimal contract: `on` and `jobs` keys, matrix structure intact.
-        # YAML treats bare `on` as the boolean True - the spec keeps it
-        # this way so we tolerate either key.
+        # YAML treats bare `on` as the boolean True, and the workflow file
+        # is written that way, so tolerate either key.
         assert "jobs" in parsed
         on_key = "on" if "on" in parsed else True
         assert on_key in parsed
         assert "test" in parsed["jobs"]
         matrix = parsed["jobs"]["test"]["strategy"]["matrix"]
-        # The spec requires 3 OS x 4 Python versions = 12 jobs.
+        # Linux, macOS and Windows across Python 3.11 to 3.14 - 12 jobs.
+        # Dropping an OS or a version is a real narrowing of coverage and
+        # should be a deliberate edit here as well as in the workflow.
         assert len(matrix["os"]) == 3
         assert len(matrix["python-version"]) == 4
 
