@@ -9,7 +9,7 @@
 
 > 참고: 다음 일곱 개 섹션은 영어 README 에만 있습니다 — *Reproducibility analysis*, *Statistical significance testing*, *Bootstrap confidence intervals*, *Paired tests for same-prompt comparisons*, *McNemar's test for hallucination significance*, *Headless Linux servers*, *More examples*. 기능 자체는 모두 사용할 수 있으며, 여기에 없는 것은 해당 설명뿐입니다. [README.md](https://github.com/SoraVantia/cli-modelarium/blob/main/README.md) 를 참조하십시오.
 
-> 터미널에서 LLM 출력을 나란히 비교 - 11개 클라우드 제공자 + 로컬 모델, 병렬 스트리밍, 배치 평가, LLM-as-judge 스코어링, 환각 감지 및 CI/CD 지원 어설션 포함.
+> 터미널에서 LLM 출력을 나란히 비교 - 12개 클라우드 제공자 + 로컬 모델, 병렬 스트리밍, 배치 평가, LLM-as-judge 스코어링, 환각 감지 및 CI/CD 지원 어설션 포함.
 
 [![CI](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
@@ -57,9 +57,9 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ## 기능
 
-### 🤖 제공자 (11개 클라우드 + 무제한 로컬)
+### 🤖 제공자 (12개 클라우드 + 무제한 로컬)
 
-- **클라우드 제공자:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM), NVIDIA (NIM)
+- **클라우드 제공자:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM), NVIDIA (NIM), Moonshot AI (Kimi)
 - **로컬 모델:** Ollama, LM Studio, vLLM, llama.cpp - localhost에서 실행되는 모든 OpenAI 호환 서버
 - 동일한 비교에서 로컬 및 클라우드 모델 혼합 가능
 - 호출마다 등록된 모든 모델 ID 선택 가능 - 내장 그룹 단축키에 국한되지 않음
@@ -69,7 +69,7 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - 모든 모델에서 동시에 토큰별 라이브 표시
 - 모델당 Time-to-First-Token (TTFT) 추적
 - 어떤 모델이 먼저 완료되는지 확인하고 출력이 실시간으로 분기되는 것을 관찰
-- 11개 제공자 모두에서 스트림 (내부적으로 SSE)
+- 12개 제공자 모두에서 스트림 (내부적으로 SSE)
 
 <p align="center">
   <img src="docs/assets/cli-modelarium-comparison-demo.gif" alt="cli-modelarium 터미널 데모: 세 모델이 동일한 프롬프트에 대한 응답을 병렬로 라이브 스트리밍한 후, 비교 테이블에 모델별 Time-to-First-Token, 지연 시간, 토큰 수 및 비용이 표시됩니다." width="718">
@@ -125,12 +125,13 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ### 🛡️ 속도 제한 처리
 
-- 제공자별 동시성 제한 (기본 5)으로 모든 티어 기준선 준수
+- 제공자별 동시성 제한 (기본 5) - 모든 제공자에 동일한 값이 적용되므로 본인의 티어와 대조해 확인하십시오
 - 지수 백오프를 사용한 자동 429 재시도
 - Anthropic의 529 "overloaded"는 속도 제한과 별도로 처리됨
 - 상위 티어의 파워 유저를 위한 `--concurrency` 플래그
 - 모델별 우아한 실패 처리 (다른 모델은 계속 진행)
 - DashScope 무료 티어 및 플래그십 Qwen (qwen3.7-max)의 속도 제한은 대부분의 제공자보다 더 엄격합니다. 429가 발생하면 `--concurrency`를 낮추십시오.
+- Moonshot은 사용 전 최소 1달러 충전이 필요하며 무료 티어가 없습니다. Tier0는 동시 요청 1건, 분당 3요청, 하루 150만 토큰입니다. 누적 10달러를 충전하면 Tier1이 됩니다. Tier0에서는 `--concurrency`를 낮추십시오.
 
 ### 🌐 크로스 플랫폼
 
@@ -242,7 +243,7 @@ cli-modelarium "Summarize the key features of microservices architecture" \
 | 코드 | 의미 |
 |------|------|
 | `0` | 성공. |
-| `1` | 어서션 실패 - 하나 이상의 어서션이 통과하지 못했습니다. `batch` 전용이며, `compare` 에는 어서션이 없습니다. |
+| `1` | 어서션 실패 - 하나 이상의 어서션이 통과하지 못했거나, `batch` 실행이 아무것도 검증하지 못했습니다. 어서션 판정을 내리는 것은 `batch` 뿐이지만, `compare` 도 예기치 않은 오류에서는 `1` 로 종료될 수 있습니다. |
 | `2` | 실행을 완료하지 못했습니다. |
 
 코드 `2` 는 서로 다른 여러 원인을 포괄하며 **그 원인을 구분하지 않습니다.** API 키 누락, 알 수 없는 모델, 지원이 종료된 모델, 제공업체 오류, 비용 상한 초과, 잘못된 형식의 배치 파일, 허용되지 않는 플래그 조합, 출력 파일 충돌, 배치 크기 상한 초과가 모두 코드 `2` 가 됩니다.
@@ -266,7 +267,7 @@ fi
 
 `--output-format json` 이 필요합니다. 기본 출력에는 기계가 읽을 수 있는 오류 필드가 없습니다. 모델을 호출하기 *전에* 발생한 실패(키 누락, 알 수 없는 모델, 잘못된 배치 파일)에서는 JSON이 전혀 생성되지 않으므로, 그런 경우에는 콘솔 메시지가 유일한 신호입니다.
 
-**개인정보 관련 참고:** JSON, CSV, Markdown 등 모든 출력 형식에는 각 결과의 전체 프롬프트와 전체 모델 응답, 그리고 제공업체의 오류 메시지가 포함됩니다. JSON에는 각 판정 모델의 추론 텍스트도 포함됩니다. `--include-reasoning`은 콘솔 표시만 제어하며 파일에는 영향을 주지 않고, CSV와 Markdown에는 포함되지 않습니다. 출력 파일을 커밋하거나 공개 CI 아티팩트로 업로드하기 전에 민감한 정보로 취급하십시오.
+**개인정보 관련 참고:** JSON, CSV, Markdown 등 모든 출력 형식에는 각 결과의 전체 프롬프트와 전체 모델 응답, 그리고 제공업체의 오류 메시지가 포함됩니다. JSON에는 각 판정 모델의 추론 텍스트도 포함됩니다. `--include-reasoning`은 콘솔 표시만 제어하며 파일에는 영향을 주지 않고, CSV와 Markdown에는 포함되지 않습니다. 출력 파일을 커밋하거나 공개 CI 아티팩트로 업로드하기 전에 민감한 정보로 취급하십시오. 데이터 보존 및 학습 관련 약관은 제공자마다 다르며, 이 도구는 그중 어느 것도 주장하지 않습니다. 설정하는 각 제공자의 약관을 확인하십시오.
 
 ## 구성
 
@@ -330,6 +331,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder 등; 일부 Qwen 모델, International/Singapore) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air 등; OpenAI 호환, 해외 엔드포인트) | ✅ | ✅ | ✅ |
 | NVIDIA NIM (등록된 9개 ID: Nemotron, Gemma 4, Mistral Nemotron, MiniMax M3, Laguna, Llama 3.1) | ✅ | ✅ | 공개된 요금 없음 |
+| Moonshot AI / Kimi (등록된 4개 ID: K3, K2.7 Code, K2.7 Code HighSpeed, K2.6) | ✅ | ✅ | ✅ |
 | **로컬: Ollama** | ❌ | ✅ | 무료 |
 | **로컬: LM Studio** | ❌ | ✅ | 무료 |
 | **로컬: vLLM** | ❌ | ✅ | 무료 |
@@ -417,7 +419,7 @@ LLM은 온도 > 0에서 비결정론적입니다 - 동일한 프롬프트를 다
 더 신뢰할 수 있는 결론을 도출하려면:
 - `--runs 5`(또는 그 이상)를 사용하면 각 비교를 자동으로 N회 실행하고 통계 요약(평균/중앙값 지연 시간, 변동계수, 최빈 출력, 출력 다양성)을 확인할 수 있습니다. 변동계수가 0.05 미만이면 실행 간 모델 동작이 안정적임을 의미합니다.
 - 환각 일관성 분석을 위해 `--runs`와 `--check-hallucination`을 함께 사용하면 여러 실행에서 모델이 얼마나 자주 환각을 일으키는지(환각 발생률)를 확인할 수 있습니다.
-- 더 결정론적인 출력을 위해 `--temperatures 0` 사용. 일부 모델은 온도 설정을 전혀 받아들이지 않습니다 - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`입니다. 도구는 이러한 모델에 대해 해당 필드를 생략하여 호출이 성공하도록 하며, 이 모델들은 제공자의 기본값으로 실행됩니다.
+- 더 결정론적인 출력을 위해 `--temperatures 0` 사용. 일부 모델은 온도 설정을 전혀 받아들이지 않습니다 - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.7-code-highspeed`, `kimi-k2.6`입니다. 도구는 이러한 모델에 대해 해당 필드를 생략하여 호출이 성공하도록 하며, 이 모델들은 제공자의 기본값으로 실행됩니다.
 - 하나가 아닌 여러 프롬프트에 걸쳐 비교
 - 체계적 분석을 위해 실행 결과를 저장하려면 `--output json` 플래그 사용(`--runs > 1`인 경우 JSON에 셀별 `stats_by_cell` 집계가 포함됩니다)
 
