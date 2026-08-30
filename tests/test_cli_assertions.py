@@ -1,8 +1,8 @@
 """CLI-level tests for assertion integration in the batch command.
 
 Verifies the exit-code contract (0/1/2), output formatter integration,
-and that --no-assertions, --min-pass-rate, and --strict-assertions all
-behave per the spec.
+and the interaction between --no-assertions, --min-pass-rate and
+--strict-assertions.
 """
 
 from __future__ import annotations
@@ -333,7 +333,11 @@ class TestCallFailureDominates:
     def test_call_failure_plus_assertion_failure_exits_2(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """Per the spec: 'exit 2 wins' over assertion failures."""
+        """A failed call outranks a failed assertion: exit 2, not 1.
+
+        The user has to fix credentials or infrastructure before an
+        assertion verdict means anything, so the harder failure wins.
+        """
         from cli_modelarium.exceptions import ProviderError
 
         class _DyingProvider(BaseProvider):
@@ -511,32 +515,69 @@ class TestMarkdownAssertionColumn:
         assert "max_length_chars" in text
 
 
-# ===== jsonschema missing: does NOT fail exit code =====
+# ===== jsonschema missing: an errored assertion is not a failure VERDICT,
+# but a run where NOTHING produced a verdict is not a pass either =====
+
+
+def _no_jsonschema(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Simulate `jsonschema` not being installed."""
+    import builtins
+    import sys
+
+    monkeypatch.delitem(sys.modules, "jsonschema", raising=False)
+    real_import = builtins.__import__
+
+    def fake_import(name: str, *a: object, **k: object) -> object:
+        if name == "jsonschema" or name.startswith("jsonschema."):
+            raise ImportError("simulated")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
 
 
 class TestJsonschemaMissingExitCode:
-    def test_missing_jsonschema_does_not_trigger_exit_1(
+    def test_errored_assertion_alongside_a_working_one_still_exits_0(
         self,
         canned_provider: _CannedProvider,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """A json_schema assertion that can't run (no jsonschema installed)
-        should NOT count as a failure for exit-code purposes.
+        """The original guarantee, preserved: a json_schema assertion that
+        can't run does NOT count as a failure verdict, so a suite whose other
+        assertions pass still exits 0. `jsonschema` stays optional.
         """
-        import builtins
-        import sys
+        _no_jsonschema(monkeypatch)
+        prompts = tmp_path / "p.json"
+        _write_json(
+            prompts,
+            [
+                {
+                    "id": "p1",
+                    "prompt": "x",
+                    "assertions": [
+                        {"type": "json_schema", "value": {"type": "object"}},
+                        {"type": "contains", "value": "Paris"},
+                    ],
+                },
+            ],
+        )
 
-        monkeypatch.delitem(sys.modules, "jsonschema", raising=False)
-        real_import = builtins.__import__
+        runner = CliRunner()
+        result = runner.invoke(cli_main, ["batch", str(prompts), "--models", "gpt-5.5"])
 
-        def fake_import(name: str, *a: object, **k: object) -> object:
-            if name == "jsonschema" or name.startswith("jsonschema."):
-                raise ImportError("simulated")
-            return real_import(name, *a, **k)
+        assert result.exit_code == 0, result.output
 
-        monkeypatch.setattr(builtins, "__import__", fake_import)
-
+    def test_every_assertion_errored_does_not_report_success(
+        self,
+        canned_provider: _CannedProvider,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """When the ONLY assertion can't run, nothing was verified. That is
+        not a failure verdict either, but it must not exit 0 - a CI gate
+        would otherwise go green on a suite that checked nothing.
+        """
+        _no_jsonschema(monkeypatch)
         prompts = tmp_path / "p.json"
         _write_json(
             prompts,
@@ -550,13 +591,10 @@ class TestJsonschemaMissingExitCode:
         )
 
         runner = CliRunner()
-        result = runner.invoke(
-            cli_main,
-            ["batch", str(prompts), "--models", "gpt-5.5"],
-        )
+        result = runner.invoke(cli_main, ["batch", str(prompts), "--models", "gpt-5.5"])
 
-        # Exit 0: the schema couldn't run, but that's not a failure verdict.
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1, result.output
+        assert "Nothing was verified" in result.output
 
 
 # ===== each of 9 assertion types end-to-end =====
@@ -625,3 +663,129 @@ class TestCompareNoAssertions:
 
         assert result.exit_code == 0
         assert "Assertions" not in result.output
+
+
+# ===== nothing verified: 0/0 must not read as success =====
+#
+# Two distinct paths reach an empty denominator and previously both rendered
+# "0/0 (100.0% pass rate)" and exited 0. They need telling apart, because the
+# user's remedy differs: a broken suite vs. a suite with nothing in it.
+
+
+_BAD_REGEX = [{"type": "regex", "value": "[unclosed"}]
+
+
+class TestNothingVerified:
+    def test_all_errored_exits_1_under_min_pass_rate(
+        self, canned_provider: _CannedProvider, tmp_path: Path
+    ) -> None:
+        prompts = tmp_path / "p.json"
+        _write_json(prompts, [{"id": "p1", "prompt": "x", "assertions": _BAD_REGEX}])
+
+        result = CliRunner().invoke(
+            cli_main,
+            ["batch", str(prompts), "--models", "gpt-5.5", "--min-pass-rate", "1.0"],
+        )
+
+        assert result.exit_code == 1, result.output
+        assert "all 1 errored" in result.output
+
+    def test_all_errored_exits_1_under_strict_and_by_default(
+        self, canned_provider: _CannedProvider, tmp_path: Path
+    ) -> None:
+        prompts = tmp_path / "p.json"
+        _write_json(prompts, [{"id": "p1", "prompt": "x", "assertions": _BAD_REGEX}])
+
+        for extra in ([], ["--strict-assertions"]):
+            result = CliRunner().invoke(
+                cli_main, ["batch", str(prompts), "--models", "gpt-5.5", *extra]
+            )
+            assert result.exit_code == 1, (extra, result.output)
+
+    def test_all_errored_json_pass_rate_is_null_not_one(
+        self, canned_provider: _CannedProvider, tmp_path: Path
+    ) -> None:
+        prompts = tmp_path / "p.json"
+        _write_json(prompts, [{"id": "p1", "prompt": "x", "assertions": _BAD_REGEX}])
+        out = tmp_path / "out.json"
+
+        CliRunner().invoke(
+            cli_main,
+            [
+                "batch", str(prompts), "--models", "gpt-5.5",
+                "--output", str(out), "--output-format", "json",
+            ],
+        )
+
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["pass_rate"] is None
+        assert payload["total_assertions"] == 0
+        assert payload["total_assertions_passed"] == 0
+        assert payload["total_assertions_errored"] == 1
+
+    def test_all_errored_console_row_and_rollup_agree(
+        self, canned_provider: _CannedProvider, tmp_path: Path
+    ) -> None:
+        """The row cell already said `0/1`; the roll-up used to say 100%."""
+        prompts = tmp_path / "p.json"
+        _write_json(prompts, [{"id": "p1", "prompt": "x", "assertions": _BAD_REGEX}])
+
+        result = CliRunner().invoke(
+            cli_main, ["batch", str(prompts), "--models", "gpt-5.5"]
+        )
+
+        assert "100.0% pass rate" not in result.output
+        assert "0.0% pass rate" not in result.output
+        assert "every assertion errored" in result.output
+        assert "0/1 errored" in result.output
+
+    def test_no_assertions_is_distinguishable_from_all_errored(
+        self, canned_provider: _CannedProvider, tmp_path: Path
+    ) -> None:
+        """Same empty denominator, different cause, different wording."""
+        prompts = tmp_path / "p.json"
+        _write_json(prompts, [{"id": "p1", "prompt": "x"}])
+
+        result = CliRunner().invoke(
+            cli_main, ["batch", str(prompts), "--models", "gpt-5.5"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "none configured" in result.output
+        assert "every assertion errored" not in result.output
+
+    def test_no_assertions_does_not_pass_a_requested_gate(
+        self, canned_provider: _CannedProvider, tmp_path: Path
+    ) -> None:
+        prompts = tmp_path / "p.json"
+        _write_json(prompts, [{"id": "p1", "prompt": "x"}])
+
+        for extra in (["--min-pass-rate", "1.0"], ["--strict-assertions"]):
+            result = CliRunner().invoke(
+                cli_main, ["batch", str(prompts), "--models", "gpt-5.5", *extra]
+            )
+            assert result.exit_code == 1, (extra, result.output)
+            assert "No assertions to evaluate" in result.output
+
+    def test_errored_count_is_present_and_zero_on_a_passing_run(
+        self, canned_provider: _CannedProvider, tmp_path: Path
+    ) -> None:
+        prompts = tmp_path / "p.json"
+        _write_json(
+            prompts,
+            [{"id": "p1", "prompt": "x", "assertions": [{"type": "contains", "value": "Paris"}]}],
+        )
+        out = tmp_path / "out.json"
+
+        result = CliRunner().invoke(
+            cli_main,
+            [
+                "batch", str(prompts), "--models", "gpt-5.5",
+                "--output", str(out), "--output-format", "json",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["total_assertions_errored"] == 0
+        assert payload["pass_rate"] == 1.0
