@@ -5,7 +5,7 @@
 
 Read this in other languages: [日本語](https://github.com/SoraVantia/cli-modelarium/blob/main/README.ja.md) | [Español](https://github.com/SoraVantia/cli-modelarium/blob/main/README.es.md) | [Français](https://github.com/SoraVantia/cli-modelarium/blob/main/README.fr.md) | [한국어](https://github.com/SoraVantia/cli-modelarium/blob/main/README.ko.md) | [中文](https://github.com/SoraVantia/cli-modelarium/blob/main/README.zh.md) | [Deutsch](https://github.com/SoraVantia/cli-modelarium/blob/main/README.de.md) | [Português](https://github.com/SoraVantia/cli-modelarium/blob/main/README.pt.md) | [Italiano](https://github.com/SoraVantia/cli-modelarium/blob/main/README.it.md)
 
-> Compare LLM outputs side-by-side from your terminal - 11 cloud providers + local models, with parallel streaming, batch evaluation, LLM-as-judge scoring, hallucination detection, and CI/CD-ready assertions.
+> Compare LLM outputs side-by-side from your terminal - 12 cloud providers + local models, with parallel streaming, batch evaluation, LLM-as-judge scoring, hallucination detection, and CI/CD-ready assertions.
 
 [![CI](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
@@ -53,9 +53,9 @@ That's it. You'll see all three models stream their responses live in parallel, 
 
 ## Features
 
-### 🤖 Providers (11 cloud + unlimited local)
+### 🤖 Providers (12 cloud + unlimited local)
 
-- **Cloud providers:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM), NVIDIA (NIM)
+- **Cloud providers:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM), NVIDIA (NIM), Moonshot AI (Kimi)
 - **Local models:** Ollama, LM Studio, vLLM, llama.cpp - any OpenAI-compatible server running on localhost
 - Mix-and-match local and cloud models in the same comparison
 - Choose any registered model id per call - not limited to the built-in group shortcuts
@@ -65,7 +65,7 @@ That's it. You'll see all three models stream their responses live in parallel, 
 - Live token-by-token display across all models simultaneously
 - Time-to-First-Token (TTFT) tracking per model
 - See which model finishes first, watch outputs diverge in real time
-- Streams from all 11 providers (SSE under the hood)
+- Streams from all 12 providers (SSE under the hood)
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/SoraVantia/cli-modelarium/main/docs/assets/cli-modelarium-comparison-demo.gif" alt="Terminal demo of cli-modelarium: three models (gpt-4o-mini, claude-haiku-4-5, gemini-3.1-flash-lite) stream answers to the same prompt in parallel, then a comparison table reports time-to-first-token, latency, token counts and cost per model." width="718">
@@ -121,12 +121,13 @@ That's it. You'll see all three models stream their responses live in parallel, 
 
 ### 🛡️ Rate limit handling
 
-- Per-provider concurrency limits (default 5) respect all tier baselines
+- Per-provider concurrency limits (default 5) - one value applied to every provider, so check it against your own tier
 - Automatic 429 retry with exponential backoff
 - Anthropic 529 "overloaded" handled separately from rate limits
 - `--concurrency` flag for power users on higher tiers
 - Graceful per-model failure (other models continue)
 - DashScope free-tier and flagship Qwen (qwen3.7-max) rate limits are tighter than most providers; lower `--concurrency` if you encounter 429s
+- Moonshot requires a $1 minimum top-up before any use - there is no free tier. Tier0 is 1 concurrent request, 3 requests per minute and 1.5M tokens per day; $10 cumulative top-up moves you to Tier1. Lower `--concurrency` on Tier0.
 
 ### 🌐 Cross-platform
 
@@ -359,7 +360,7 @@ The command exits with code 1 if pass rate drops below 90%, failing the build.
 | Code | Meaning |
 |------|---------|
 | `0` | Success. |
-| `1` | Assertion failure - one or more assertions did not pass. `batch` only; `compare` has no assertions. |
+| `1` | Assertion failure - one or more assertions did not pass, or a `batch` run verified nothing. Only `batch` produces an assertion verdict; `compare` can still exit `1` on an unexpected error. |
 | `2` | The run could not complete. |
 
 Code `2` covers several distinct causes and **does not distinguish between them**: a missing API key, an unknown model, a retired model, a provider error, an exceeded cost cap, a malformed batch file, a rejected flag combination, an output-file conflict, or an exceeded batch size cap.
@@ -383,7 +384,7 @@ fi
 
 `--output-format json` is required - the default output carries no machine-readable error field. Note that failures which happen *before* any model is called (a missing key, an unknown model, a bad batch file) produce no JSON at all; the console message is the only signal in those cases.
 
-**Privacy note:** Every output format - JSON, CSV and Markdown - embeds the full prompt and the full model response for every result, alongside any provider error message. JSON additionally embeds each judge's reasoning text; `--include-reasoning` gates only the console display, not the file, and CSV and Markdown do not carry it. Treat any output file as sensitive before committing it or uploading it as a public CI artifact.
+**Privacy note:** Every output format - JSON, CSV and Markdown - embeds the full prompt and the full model response for every result, alongside any provider error message. JSON additionally embeds each judge's reasoning text; `--include-reasoning` gates only the console display, not the file, and CSV and Markdown do not carry it. Treat any output file as sensitive before committing it or uploading it as a public CI artifact. Separately, providers differ on data retention and on whether they train on what you send; this tool makes no claim about any of them, and you should check the terms of each provider you configure.
 
 ### More examples
 
@@ -450,6 +451,7 @@ export OPENROUTER_API_KEY="sk-or-..."
 export DASHSCOPE_API_KEY="sk-..."
 export ZAI_API_KEY="..."
 export NVIDIA_API_KEY="nvapi-..."
+export MOONSHOT_API_KEY="sk-..."
 ```
 
 `cli-modelarium` checks environment variables before the OS keyring, so this works out of the box. If you prefer a keyring on Linux, install `gnome-keyring` (GNOME), KWallet (KDE), or `keyrings.alt` (file-based fallback).
@@ -484,6 +486,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, etc.; select Qwen models, International/Singapore) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air, etc.; OpenAI-compatible, overseas endpoint) | ✅ | ✅ | ✅ |
 | NVIDIA NIM (9 registered IDs: Nemotron, Gemma 4, Mistral Nemotron, MiniMax M3, Laguna, Llama 3.1) | ✅ | ✅ | No published rate |
+| Moonshot AI / Kimi (4 registered IDs: K3, K2.7 Code, K2.7 Code HighSpeed, K2.6) | ✅ | ✅ | ✅ |
 | **Local: Ollama** | ❌ | ✅ | Free |
 | **Local: LM Studio** | ❌ | ✅ | Free |
 | **Local: vLLM** | ❌ | ✅ | Free |
@@ -571,7 +574,7 @@ LLMs are non-deterministic at temperature > 0 - re-running the same prompt may p
 To draw more reliable conclusions:
 - Use `--runs 5` (or higher) to automatically run each comparison N times and see statistical summaries: mean/median latency, coefficient of variation, mode output, and output diversity. Coefficient of variation below 0.05 indicates stable model behavior across runs.
 - For hallucination consistency analysis, combine `--runs` with `--check-hallucination` to see how often the model produces hallucinations across multiple runs (the hallucination rate).
-- Use `--temperatures 0` for more deterministic outputs. Some models do not accept a temperature setting at all - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra` and `gpt-5.6-luna`. The tool omits the field for those so the call still succeeds, and they run at their provider's default instead.
+- Use `--temperatures 0` for more deterministic outputs. Some models do not accept a temperature setting at all - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.7-code-highspeed` and `kimi-k2.6`. The tool omits the field for those so the call still succeeds, and they run at their provider's default instead.
 - Compare across multiple prompts, not just one
 - Use the `--output json` flag to save runs for systematic analysis (with `--runs > 1` the JSON includes per-cell `stats_by_cell` aggregates)
 
