@@ -112,6 +112,28 @@ class JudgeResult:
     # Populated by hallucination.annotate_risk_levels(), not _aggregate.
     aggregated_risk_level: str | None = None
 
+    # THREE MORE ATTRIBUTES ARE ATTACHED TO INSTANCES OF THIS CLASS AND ARE NOT
+    # DECLARED HERE. They are set in cli.py, where mode-only judging expands one
+    # verdict per cell across every run in that cell:
+    #
+    #   _state_id   int   - id() of the StreamState this verdict belongs to.
+    #                       The score and paired extractors in run_statistics
+    #                       match verdicts back to states through it.
+    #   _broadcast  bool  - this verdict is one cell's single judgement, shared
+    #                       by every run in the cell. The statistics use it to
+    #                       count one observation per cell rather than per run.
+    #   _inherited  bool  - narrower: this row is a zero-cost copy of another
+    #                       row's verdict, not a call of its own. Only
+    #                       `total_judge_calls` below reads it, and it cannot
+    #                       recover the fact from the row, because a zero cost
+    #                       is also what genuinely-free judge models report.
+    #
+    # Dynamic attributes rather than fields because serialisation is by explicit
+    # field list: nothing here can reach JSON, CSV or markdown. Declaring them
+    # would change that. `_state_id` went undocumented for three releases
+    # precisely because it was written in cli.py and read from run_statistics,
+    # with nothing at the definition to find; this block is the fix for that.
+
 
 # ===== Response parsing =====
 
@@ -490,5 +512,14 @@ def total_judge_cost(results: list[JudgeResult]) -> float:
 
 
 def total_judge_calls(results: list[JudgeResult]) -> int:
-    """Count every JudgeScore (successful or failed) across all results."""
-    return sum(len(r.judges) for r in results)
+    """Count every JudgeScore (successful or failed) across all results.
+
+    Rows that only inherited another run's verdict are skipped: under
+    mode-only judging one call per cell is copied to every run in that cell,
+    so counting rows reported 40 calls for the 2 that were made. The marker is
+    set at the expansion, not inferred from a zero cost here - free judge
+    models exist, and their calls must still count.
+    """
+    return sum(
+        len(r.judges) for r in results if not getattr(r, "_inherited", False)
+    )
