@@ -28,6 +28,7 @@ from cli_modelarium.assertions import (
     FAIL_MARK,
     PASS_MARK,
     AssertionResult,
+    count_assertion_totals,
     count_passed,
     failed_types,
     format_assertion_message,
@@ -392,17 +393,15 @@ def _format_json(
         payload["judge_cost_usd"] = judge_cost
         payload["total_cost_usd_with_judges"] = total_cost + judge_cost
     if has_assertions:
-        total_passed = 0
-        total_definitive = 0
-        for r in results:
-            if r.assertion_results is None:
-                continue
-            p, d = count_passed(r.assertion_results)
-            total_passed += p
-            total_definitive += d
-        payload["total_assertions"] = total_definitive
-        payload["total_assertions_passed"] = total_passed
-        payload["pass_rate"] = total_passed / total_definitive if total_definitive else 1.0
+        totals = count_assertion_totals(r.assertion_results for r in results)
+        payload["total_assertions"] = totals.definitive
+        payload["total_assertions_passed"] = totals.passed
+        # Always present whenever the block fires, 0 on the normal path: a
+        # consumer must not have to read absence as "nothing errored", which
+        # would be indistinguishable from a version that never emitted it.
+        payload["total_assertions_errored"] = totals.errored
+        # null, not 1.0, when nothing was definitive. See AssertionTotals.
+        payload["pass_rate"] = totals.pass_rate
     if significance_results:
         payload["significance_tests"] = [
             _significance_result_to_dict(r) for r in significance_results
@@ -657,6 +656,22 @@ def _result_to_dict(r: BatchResult, include_run_index: bool = False) -> dict[str
 # ===== Markdown =====
 
 
+def significance_temperature_caveat(omitted: list[str]) -> str:
+    """The significance half of the temperature caveat: samples not comparable.
+
+    Lives here rather than in cli.py because both the console and the markdown
+    report render it, and cli.py already imports from this module. One wording,
+    so a reader comparing the two surfaces sees the same warning.
+    """
+    return (
+        f"{', '.join(omitted)} ran at the provider default temperature, which "
+        f"you did not choose - the provider rejects the field, so it is omitted. "
+        f"The models in this run were therefore not sampled under identical "
+        f"conditions, and a significance result across them may reflect that "
+        f"difference rather than a difference in model quality."
+    )
+
+
 def _format_markdown(
     results: list[BatchResult],
     runs: int = 1,
@@ -664,6 +679,8 @@ def _format_markdown(
     stats_by_cell_cis: dict | None = None,
     mcnemar_results: list | None = None,
     methodology: dict | None = None,
+    models_without_temperature: list[str] | None = None,
+    significance_temperature_mixed: bool = False,
 ) -> str:
     """Render results as Markdown grouped by prompt_id.
 
@@ -710,18 +727,21 @@ def _format_markdown(
         lines.append(f"- Judge cost: ${judge_cost:.6f}")
         lines.append(f"- Combined cost: ${total_cost + judge_cost:.6f}")
     if has_assertions:
-        total_passed = 0
-        total_definitive = 0
-        for r in results:
-            if r.assertion_results is None:
-                continue
-            p, d = count_passed(r.assertion_results)
-            total_passed += p
-            total_definitive += d
-        pass_rate = total_passed / total_definitive if total_definitive else 1.0
-        lines.append(
-            f"- Assertions: {total_passed}/{total_definitive} ({pass_rate * 100:.1f}% pass rate)"
-        )
+        totals = count_assertion_totals(r.assertion_results for r in results)
+        if totals.pass_rate is not None:
+            lines.append(
+                f"- Assertions: {totals.passed}/{totals.definitive} "
+                f"({totals.pass_rate * 100:.1f}% pass rate)"
+            )
+        elif totals.errored:
+            # No percentage: 0% would read as "everything failed", which is a
+            # different claim from "nothing could be checked".
+            lines.append(
+                f"- Assertions: {ERROR_MARK} 0/{totals.errored} - every assertion "
+                f"errored, nothing was verified"
+            )
+        else:
+            lines.append("- Assertions: none configured - nothing was verified")
     lines.append(f"- Results: {len(results)} ({failures} failed)")
     lines.append("")
 
@@ -865,6 +885,16 @@ def _format_markdown(
         if sig_lines:
             lines.extend(sig_lines)
 
+    # The temperature caveat reached the console and the JSON, never the
+    # markdown - the one format written to a file and circulated, where the
+    # p-value it qualifies is read by someone who did not watch the run.
+    if significance_temperature_mixed and models_without_temperature:
+        lines.append(
+            "> **Temperature not applied:** "
+            + significance_temperature_caveat(sorted(models_without_temperature))
+        )
+        lines.append("")
+
     if mcnemar_results:
         mc_lines = _markdown_mcnemar_section(mcnemar_results)
         if mc_lines:
@@ -927,9 +957,11 @@ def _markdown_significance_section(significance_results: list) -> list[str]:
             else "-"
         )
         sig = "✓" if r.significant_at_threshold else ""
+        mean_a = f"{r.mean_a:.4f}" if r.mean_a is not None else "-"
+        mean_b = f"{r.mean_b:.4f}" if r.mean_b is not None else "-"
         out.append(
             f"| `{r.model_a}` | `{r.model_b}` "
-            f"| {r.mean_a:.4f} | {r.mean_b:.4f} "
+            f"| {mean_a} | {mean_b} "
             f"| {p_raw} | {p_corr} | {d_str} | {sig} |"
         )
     out.append("")
@@ -1000,6 +1032,8 @@ def write_markdown(
     stats_by_cell_cis: dict | None = None,
     mcnemar_results: list | None = None,
     methodology: dict | None = None,
+    models_without_temperature: list[str] | None = None,
+    significance_temperature_mixed: bool = False,
 ) -> None:
     """Atomic write of `results` to `output_path` as Markdown."""
     atomic_write_bytes(
@@ -1011,6 +1045,8 @@ def write_markdown(
             stats_by_cell_cis=stats_by_cell_cis,
             mcnemar_results=mcnemar_results,
             methodology=methodology,
+            models_without_temperature=models_without_temperature,
+            significance_temperature_mixed=significance_temperature_mixed,
         ).encode("utf-8"),
     )
 
@@ -1023,6 +1059,8 @@ def render_markdown_to_console(
     stats_by_cell_cis: dict | None = None,
     mcnemar_results: list | None = None,
     methodology: dict | None = None,
+    models_without_temperature: list[str] | None = None,
+    significance_temperature_mixed: bool = False,
 ) -> None:
     """Render Markdown via Rich for stdout display."""
     console.print(
@@ -1034,6 +1072,8 @@ def render_markdown_to_console(
                 stats_by_cell_cis=stats_by_cell_cis,
                 mcnemar_results=mcnemar_results,
                 methodology=methodology,
+            models_without_temperature=models_without_temperature,
+            significance_temperature_mixed=significance_temperature_mixed,
             )
         )
     )
@@ -1086,10 +1126,16 @@ def _hallucination_summary_cell(r: BatchResult) -> str:
     if r.judge_result is None or not r.judge_result.judges:
         return "-"
     successful = [j for j in r.judge_result.judges if j.score is not None and j.risk_level]
-    if not successful:
-        return "N/A"
 
     risk = r.judge_result.aggregated_risk_level or "?"
+
+    if not successful:
+        # A judge can classify the risk and still return no parsable score.
+        # `hallucination_risk` in the JSON needs only the classification, so
+        # this cell said "N/A" for a row the JSON called High.
+        if r.judge_result.aggregated_risk_level is not None:
+            return f"{risk} (no score)"
+        return "N/A"
 
     if len(successful) == 1 and len(r.judge_result.judges) == 1:
         s = successful[0]
