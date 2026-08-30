@@ -9,7 +9,7 @@ Nota: Questo README è tradotto per accessibilità. Lo strumento CLI Cli Modelar
 
 > Nota: sette sezioni esistono solo nel README in inglese — *Reproducibility analysis*, *Statistical significance testing*, *Bootstrap confidence intervals*, *Paired tests for same-prompt comparisons*, *McNemar's test for hallucination significance*, *Headless Linux servers* e *More examples*. Le funzionalità sono pienamente disponibili; qui manca solo la loro documentazione. Vedere [README.md](https://github.com/SoraVantia/cli-modelarium/blob/main/README.md).
 
-> Confronta gli output degli LLM affiancati dal tuo terminale - 11 provider cloud + modelli locali, con streaming parallelo, valutazione batch, scoring LLM-as-judge, rilevamento delle allucinazioni e asserzioni pronte per CI/CD.
+> Confronta gli output degli LLM affiancati dal tuo terminale - 12 provider cloud + modelli locali, con streaming parallelo, valutazione batch, scoring LLM-as-judge, rilevamento delle allucinazioni e asserzioni pronte per CI/CD.
 
 [![CI](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/SoraVantia/cli-modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
@@ -57,9 +57,9 @@ Ecco fatto. Si vedranno tutti e tre i modelli trasmettere le loro risposte in pa
 
 ## Funzionalità
 
-### 🤖 Provider (11 cloud + locali illimitati)
+### 🤖 Provider (12 cloud + locali illimitati)
 
-- **Provider cloud:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM), NVIDIA (NIM)
+- **Provider cloud:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM), NVIDIA (NIM), Moonshot AI (Kimi)
 - **Modelli locali:** Ollama, LM Studio, vLLM, llama.cpp - qualsiasi server compatibile con OpenAI in esecuzione su localhost
 - Combina modelli locali e cloud nello stesso confronto
 - Scegli qualsiasi ID modello registrato per chiamata - senza limitarti alle scorciatoie di gruppo integrate
@@ -69,7 +69,7 @@ Ecco fatto. Si vedranno tutti e tre i modelli trasmettere le loro risposte in pa
 - Visualizzazione live token per token su tutti i modelli contemporaneamente
 - Tracciamento Time-to-First-Token (TTFT) per modello
 - Vedere quale modello finisce per primo, osservare gli output divergere in tempo reale
-- Streams da tutti gli 11 provider (SSE sotto il cofano)
+- Streams da tutti gli 12 provider (SSE sotto il cofano)
 
 <p align="center">
   <img src="docs/assets/cli-modelarium-comparison-demo.gif" alt="Dimostrazione di cli-modelarium nel terminale: tre modelli trasmettono le loro risposte allo stesso prompt in parallelo, poi una tabella di confronto mostra Time-to-First-Token, latenza, conteggi di token e costo per modello." width="718">
@@ -125,12 +125,13 @@ Ecco fatto. Si vedranno tutti e tre i modelli trasmettere le loro risposte in pa
 
 ### 🛡️ Gestione dei limiti di velocità
 
-- Limiti di concorrenza per provider (default 5) rispettano tutte le baseline di livello
+- Limiti di concorrenza per provider (default 5) - un unico valore per tutti i provider, da verificare rispetto al proprio livello
 - Riprova 429 automatica con backoff esponenziale
 - Il 529 "overloaded" di Anthropic è gestito separatamente dai limiti di velocità
 - Flag `--concurrency` per utenti avanzati su livelli superiori
 - Fallimento elegante per modello (gli altri modelli continuano)
 - I limiti di velocità del livello gratuito di DashScope e del modello Qwen di punta (qwen3.7-max) sono più restrittivi rispetto alla maggior parte dei provider; ridurre `--concurrency` se si incontrano errori 429
+- Moonshot richiede una ricarica minima di 1 $ prima di qualsiasi utilizzo: non esiste un livello gratuito. Il Tier0 prevede 1 richiesta concorrente, 3 richieste al minuto e 1,5 M di token al giorno; una ricarica cumulativa di 10 $ porta al Tier1. Riduci `--concurrency` sul Tier0.
 
 ### 🌐 Multipiattaforma
 
@@ -242,7 +243,7 @@ Il comando esce con codice 1 se il tasso di superamento scende sotto il 90%, fac
 | Codice | Significato |
 |--------|-------------|
 | `0` | Successo. |
-| `1` | Fallimento di un'asserzione - una o più asserzioni non sono state soddisfatte. Solo `batch`; `compare` non prevede asserzioni. |
+| `1` | Fallimento di un'asserzione - una o più asserzioni non sono state soddisfatte, oppure un'esecuzione `batch` non ha verificato nulla. Solo `batch` produce un verdetto sulle asserzioni; `compare` può comunque uscire con `1` per un errore imprevisto. |
 | `2` | L'esecuzione non è potuta arrivare a termine. |
 
 Il codice `2` copre diverse cause distinte e **non le distingue**: una chiave API mancante, un modello sconosciuto, un modello ritirato, un errore del provider, un tetto di spesa superato, un file batch malformato, una combinazione di flag rifiutata, un conflitto sul file di output o un limite di dimensione del batch superato.
@@ -266,7 +267,7 @@ fi
 
 `--output-format json` è necessario: l'output predefinito non contiene alcun campo di errore leggibile da una macchina. Si noti che i fallimenti che avvengono *prima* di qualsiasi chiamata al modello (chiave mancante, modello sconosciuto, file batch errato) non producono alcun JSON; in quei casi il messaggio a console è l'unico segnale.
 
-**Nota sulla privacy:** ogni formato di output - JSON, CSV e Markdown - include il prompt completo e la risposta completa del modello per ogni risultato, insieme a eventuali messaggi di errore del provider. JSON include inoltre il testo di ragionamento di ogni giudice; `--include-reasoning` controlla solo la visualizzazione in console, non il file, e CSV e Markdown non lo contengono. Trattare qualsiasi file di output come sensibile prima di committarlo o caricarlo come artefatto CI pubblico.
+**Nota sulla privacy:** ogni formato di output - JSON, CSV e Markdown - include il prompt completo e la risposta completa del modello per ogni risultato, insieme a eventuali messaggi di errore del provider. JSON include inoltre il testo di ragionamento di ogni giudice; `--include-reasoning` controlla solo la visualizzazione in console, non il file, e CSV e Markdown non lo contengono. Trattare qualsiasi file di output come sensibile prima di committarlo o caricarlo come artefatto CI pubblico. Le condizioni di conservazione dei dati e di addestramento variano da provider a provider, questo strumento non afferma nulla al riguardo, ed è opportuno verificare le condizioni di ogni provider che configuri.
 
 ## Configurazione
 
@@ -330,6 +331,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, ecc.; modelli Qwen selezionati, Internazionale/Singapore) | ✅ | ✅ | ✅ |
 | Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air, ecc.; compatibile con OpenAI, endpoint internazionale) | ✅ | ✅ | ✅ |
 | NVIDIA NIM (9 ID registrati: Nemotron, Gemma 4, Mistral Nemotron, MiniMax M3, Laguna, Llama 3.1) | ✅ | ✅ | Nessuna tariffa pubblicata |
+| Moonshot AI / Kimi (4 ID registrati: K3, K2.7 Code, K2.7 Code HighSpeed, K2.6) | ✅ | ✅ | ✅ |
 | **Locale: Ollama** | ❌ | ✅ | Gratuito |
 | **Locale: LM Studio** | ❌ | ✅ | Gratuito |
 | **Locale: vLLM** | ❌ | ✅ | Gratuito |
@@ -417,7 +419,7 @@ Gli LLM non sono deterministici a temperatura > 0 - rieseguire lo stesso prompt 
 Per trarre conclusioni più affidabili:
 - Usare `--runs 5` (o più) per eseguire automaticamente ogni confronto N volte e vedere riepiloghi statistici: latenza media/mediana, coefficiente di variazione, output modale e diversità degli output. Un coefficiente di variazione inferiore a 0,05 indica un comportamento del modello stabile tra le esecuzioni.
 - Per l'analisi della coerenza delle allucinazioni, combinare `--runs` con `--check-hallucination` per vedere con quale frequenza il modello produce allucinazioni su più esecuzioni (il tasso di allucinazione).
-- Usare `--temperatures 0` per output più deterministici. Alcuni modelli non accettano alcuna impostazione di temperatura - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra` e `gpt-5.6-luna`. Lo strumento omette il campo per questi modelli in modo che la chiamata vada comunque a buon fine, ed essi vengono eseguiti con il valore predefinito del provider.
+- Usare `--temperatures 0` per output più deterministici. Alcuni modelli non accettano alcuna impostazione di temperatura - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.7-code-highspeed` e `kimi-k2.6`. Lo strumento omette il campo per questi modelli in modo che la chiamata vada comunque a buon fine, ed essi vengono eseguiti con il valore predefinito del provider.
 - Confrontare tra più prompt, non solo uno
 - Usare il flag `--output json` per salvare le esecuzioni per l'analisi sistematica (con `--runs > 1` il JSON include aggregati `stats_by_cell` per cella)
 
