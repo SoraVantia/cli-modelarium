@@ -167,6 +167,17 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
         "provider": "anthropic",
         "rejects_sampling_params": True,
     },
+    # The 0.25 cache rate is 2.5% of input, where every other Claude row is
+    # 10%, and reads as a dropped digit. It is not: Anthropic's pricing page
+    # footnotes cache hits on Fable 5.1 and Mythos 5.1 at 0.025x base input,
+    # every other model at 0.1x.
+    "claude-fable-5-1": {
+        "input": 10.00,
+        "output": 50.00,
+        "cached_input": 0.25,
+        "provider": "anthropic",
+        "rejects_sampling_params": True,
+    },
     "claude-opus-4-8": {
         "input": 5.00,
         "output": 25.00,
