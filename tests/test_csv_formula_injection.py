@@ -144,7 +144,7 @@ class TestOrdinaryOutputIsUnchanged:
     def test_a_normal_result_is_byte_identical(self) -> None:
         # Nothing that does not begin with a formula character may move.
         text = _format_csv([_result()])
-        expected = "p1,what is 2+2?,,gpt-5.5,0.0,850.0,120.0,10,5,0,0.001,4,,0,,,0,,,,"
+        expected = "p1,what is 2+2?,,gpt-5.5,0.0,850.0,120.0,10,5,0,0.001,4,,0,,,0,,,,,,"
         assert _data_row(text) == expected
 
     def test_an_interior_equals_is_left_alone(self) -> None:
@@ -206,13 +206,13 @@ class TestTheComparePathIsCovered:
 
 
 class TestTheColumnContractIsUnchanged:
-    def test_header_is_the_canonical_21(self) -> None:
+    def test_header_is_the_canonical_23(self) -> None:
         from cli_modelarium.output_formatters import CSV_COLUMNS
 
         header = next(csv.reader(io.StringIO(_format_csv([_result()]))))
         assert tuple(header) == CSV_COLUMNS
-        assert len(header) == 21
+        assert len(header) == 23
 
-    def test_a_defused_row_still_has_21_fields(self) -> None:
+    def test_a_defused_row_still_has_23_fields(self) -> None:
         rows = list(csv.reader(io.StringIO(_format_csv([_result(output=HYPERLINK_PAYLOAD)]))))
-        assert len(rows[1]) == 21
+        assert len(rows[1]) == 23
