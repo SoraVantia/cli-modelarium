@@ -2,6 +2,32 @@
 
 All notable changes to Cli Modelarium will be documented in this file.
 
+## [0.1.9] - 2026-09-02
+
+### Added
+
+- **Claude Fable 5.1 joins the registry** as `claude-fable-5-1`, at $10.00 input / $50.00 output per 1M tokens with a $0.25 cache-read rate, taking the registry from 93 models to 94. It rejects sampling parameters - `temperature`, `top_p` and `top_k` each return a 400 reading "deprecated for this model" - so the tool omits the field and the flagged set goes from sixteen to seventeen. Used as a judge it therefore joins the degraded-judge set and prints the non-reproducibility notice, exactly as `claude-opus-5` and `claude-sonnet-5` do. Thinking tokens are counted inside `output_tokens`, so the output rate covers them and the reported cost is complete.
+
+  **The $0.25 cache rate is 2.5% of input, where every other Claude row is 10%, and it is not a typo.** Anthropic's pricing page footnotes cache hits on Fable 5.1 and Mythos 5.1 at 0.025x base input and every other model at 0.1x. It is pinned by a test, because an editor "correcting" it to $1.00 would quadruple every reported cache saving in silence.
+
+  It is in **no static group**: `all-flagship` / `all-premium` carry one model per provider and `claude-opus-5` holds the Anthropic slot, so promoting Fable would double the input and output price of every `all-flagship` run. It **is** included in `--models all`, on the same basis as every provider except OpenRouter and NVIDIA - its prices are real and it adds no duplicate-weight row. At $10/$50 that is the most expensive row `all` can select, and `--max-cost` is the existing lever if that matters to you.
+
+  The nine READMEs gain a line in the privacy note: Claude Fable 5.1 requires 30-day retention and is not available under zero-data-retention. It is the only registry row with such a condition, and the line is phrased as a property of that model rather than a contrast - this tool has not verified the retention posture of the other 93.
+
+### Changed
+
+- **The Anthropic SDK moves to 1.x; `temperature` now travels via `extra_body`.** The pin was `anthropic>=0.104,<0.200`, which cannot install any 1.x release. 1.x removed `temperature`, `top_p` and `top_k` from its typed signatures, so passing one raises `TypeError` before any HTTP call - which broke five of the ten registered Claude models (`claude-haiku-4-5`, `claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-opus-4-6`, `claude-opus-4-5`); the other five never receive a temperature and were unaffected. The provider now sends it through `extra_body`, which is merged into the request JSON as-is and which those models still honour. The pin floors at 1.3, not 1.0: 1.3.0 is what this provider was exercised against, and 1.0.0-1.2.0 have been run by nobody here. Nothing else in `pyproject.toml` moves - `httpx~=0.28` stays, because `httpx2` is a separate distribution and the two resolve side by side; the full resolve adds `httpx2`, `httpcore2` and `truststore` and removes or downgrades nothing.
+
+  **Temperature validation is unchanged, in both directions.** The 0..1 range was never enforced client-side - the typed parameter was an annotation, not a constraint, and 0.125.0 sent `temperature=2.0` and even `temperature="hot"` to the server without complaint. `--temperatures 0,0.7,2` failed as a round-trip 400 before this change and still does. No client-side range check was added: doing so would change behaviour this release otherwise leaves alone.
+
+- **The CSV layout gained two columns, `stop_reason` and `stop_category`, appended after `assertions_failed_types`.** A pipeline reading CSV by column position will need updating; one reading by header name is unaffected. They are empty for every non-refused row.
+
+### Fixed
+
+- **Refusals from Claude models are now reported as refused rather than counted as empty successes, with their cost and a new `stop_reason` field.** A declined request arrives on HTTP 200 with real cost and no answer, and the provider only ever read the usage block - so it recorded an ordinary success with an empty output. Four of the ten assertion types pass against an empty string (`not_contains`, `max_length_chars`, `latency_under`, `cost_under`), which meant a CI gate built from cost, latency and a length cap reported a 100% pass rate on a request the model declined and you were billed for. That gate now exits 1: a refused cell marks every configured assertion as errored, which leaves `pass_rate` undefined and routes to the existing "nothing was verified" path rather than needing a new exit code. Detection is by `stop_reason`, never by an empty content array - `claude-opus-5` refuses with a thinking block and non-zero output tokens while `claude-fable-5` refuses with nothing, so an emptiness check would miss the first. `refused` is carried beside `error`, never folded into it: `error` still means the call failed and cost nothing, so a refusal keeps its cost in every total and does not turn a 200 into a call failure. Output-derived statistics now exclude refusals; timing and cost do not. That matters most under `--runs`, where five refusals used to give one unique output, `output_diversity` 0.2 and a stable mode of `""` - low diversity and a steady mode read as a highly deterministic model, when it had refused five times. `stop_category` is stored and rendered as an opaque string and never branched on, because the provider's category set is open.
+
+- **Provider request parameters are now checked against the real SDK signature.** Every provider's test double accepts `**kwargs`, so a keyword the real typed method rejects passes in tests and raises `TypeError` on every live call. A new suite drives each provider's real code path through a recorder and asserts the kwargs it built are a subset of the parameters the installed SDK declares, for all four SDK families; Google's nested `config=` keys are checked the same way. It needs no network and no API key.
+
 ## [0.1.8] - 2026-08-31
 
 ### Added
