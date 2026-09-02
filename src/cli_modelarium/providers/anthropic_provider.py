@@ -58,8 +58,14 @@ class AnthropicProvider(BaseProvider):
         }
         # Newer Claude models 400 on any non-default temperature; omitting the
         # field is the documented way to call them. Absent flag means send.
+        #
+        # Via `extra_body`, not a keyword: the SDK removed temperature, top_p
+        # and top_k from its typed signatures in 1.x, so passing one raises
+        # TypeError before any HTTP call. `extra_body` is merged into the
+        # request JSON as-is, and the models that accept temperature still
+        # honour it.
         if not rejects_sampling_params(model):
-            kwargs["temperature"] = temperature
+            kwargs["extra_body"] = {"temperature": temperature}
         if system_prompt:
             kwargs["system"] = system_prompt
         return kwargs
@@ -71,6 +77,13 @@ class AnthropicProvider(BaseProvider):
         temperature: float,
         system_prompt: str | None = None,
     ) -> AsyncIterator[str]:
+        """Yield text chunks. REFUSAL-BLIND BY DESIGN - use `complete()` instead.
+
+        A refused request yields zero chunks and terminates normally, which is
+        indistinguishable from a model that answered with nothing. `complete()`
+        holds the final message and reads `stop_reason`; nothing in the CLI
+        calls this method.
+        """
         kwargs = self._build_kwargs(prompt, model, temperature, system_prompt)
         try:
             async with self.client.messages.stream(**kwargs) as stream:
@@ -96,9 +109,15 @@ class AnthropicProvider(BaseProvider):
         input_tokens = 0
         output_tokens = 0
         cached_tokens = 0
+        stop_reason: str | None = None
+        stop_category: str | None = None
 
         try:
             async with self.client.messages.stream(**kwargs) as stream:
+                # `text_stream` yields text deltas only - the SDK filters
+                # thinking blocks out of it. Nothing here reads `.content` or
+                # indexes `content[0]`, so a response whose content array leads
+                # with a ThinkingBlock needs no special handling.
                 async for text in stream.text_stream:
                     if ttft_ms is None:
                         ttft_ms = (time.monotonic() - start) * 1000
@@ -110,8 +129,17 @@ class AnthropicProvider(BaseProvider):
                 input_tokens = getattr(usage, "input_tokens", 0) or 0
                 output_tokens = getattr(usage, "output_tokens", 0) or 0
                 cached_tokens = getattr(usage, "cache_read_input_tokens", 0) or 0
+                stop_reason = getattr(final, "stop_reason", None)
+                details = getattr(final, "stop_details", None)
+                stop_category = getattr(details, "category", None) if details else None
         except anthropic.APIError as e:
             self._reraise(e)
+
+        # A refusal arrives on HTTP 200 with real cost. It is identified by
+        # `stop_reason`, never by an empty content array: claude-opus-5 refuses
+        # with a ThinkingBlock and non-zero output tokens, claude-fable-5 with
+        # nothing at all, so an emptiness check misses the first of those.
+        refused = stop_reason == "refusal"
 
         latency_ms = (time.monotonic() - start) * 1000
 
@@ -131,6 +159,9 @@ class AnthropicProvider(BaseProvider):
             model=model,
             provider=self.name,
             temperature=temperature,
+            refused=refused,
+            stop_reason=stop_reason,
+            stop_category=stop_category,
         )
 
     def _reraise(self, error: anthropic.APIError) -> None:
