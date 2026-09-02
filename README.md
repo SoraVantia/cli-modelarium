@@ -384,7 +384,7 @@ fi
 
 `--output-format json` is required - the default output carries no machine-readable error field. Note that failures which happen *before* any model is called (a missing key, an unknown model, a bad batch file) produce no JSON at all; the console message is the only signal in those cases.
 
-**Privacy note:** Every output format - JSON, CSV and Markdown - embeds the full prompt and the full model response for every result, alongside any provider error message. JSON additionally embeds each judge's reasoning text; `--include-reasoning` gates only the console display, not the file, and CSV and Markdown do not carry it. Treat any output file as sensitive before committing it or uploading it as a public CI artifact. Separately, providers differ on data retention and on whether they train on what you send; this tool makes no claim about any of them, and you should check the terms of each provider you configure.
+**Privacy note:** Every output format - JSON, CSV and Markdown - embeds the full prompt and the full model response for every result, alongside any provider error message. JSON additionally embeds each judge's reasoning text; `--include-reasoning` gates only the console display, not the file, and CSV and Markdown do not carry it. Treat any output file as sensitive before committing it or uploading it as a public CI artifact. Separately, providers differ on data retention and on whether they train on what you send; this tool makes no claim about any of them, and you should check the terms of each provider you configure. Claude Fable 5.1 requires 30-day retention and is not available under zero-data-retention.
 
 ### More examples
 
@@ -574,7 +574,7 @@ LLMs are non-deterministic at temperature > 0 - re-running the same prompt may p
 To draw more reliable conclusions:
 - Use `--runs 5` (or higher) to automatically run each comparison N times and see statistical summaries: mean/median latency, coefficient of variation, mode output, and output diversity. Coefficient of variation below 0.05 indicates stable model behavior across runs.
 - For hallucination consistency analysis, combine `--runs` with `--check-hallucination` to see how often the model produces hallucinations across multiple runs (the hallucination rate).
-- Use `--temperatures 0` for more deterministic outputs. Some models do not accept a temperature setting at all - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.7-code-highspeed` and `kimi-k2.6`. The tool omits the field for those so the call still succeeds, and they run at their provider's default instead.
+- Use `--temperatures 0` for more deterministic outputs. Some models do not accept a temperature setting at all - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `claude-fable-5-1`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.7-code-highspeed` and `kimi-k2.6`. The tool omits the field for those so the call still succeeds, and they run at their provider's default instead.
 - Compare across multiple prompts, not just one
 - Use the `--output json` flag to save runs for systematic analysis (with `--runs > 1` the JSON includes per-cell `stats_by_cell` aggregates)
 
