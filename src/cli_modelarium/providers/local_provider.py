@@ -32,6 +32,10 @@ class LocalProvider(OpenAIProvider):
     DEFAULT_URL: str = "http://localhost:11434/v1"
     LOCAL_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
     DUMMY_API_KEY: str = "not-required"
+    # Bounds the one loopback GET to /models that `list-models --local-only`
+    # makes, so it is also how long that command hangs when nothing is
+    # listening. Slack rather than a measured figure - a local server answers
+    # this in milliseconds; raise it if one is ever slower.
     DISCOVERY_TIMEOUT_SECONDS: float = 5.0
 
     def __init__(self, base_url: str | None = None) -> None:
