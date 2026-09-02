@@ -95,6 +95,39 @@ class AssertionResult:
 # ===== config parsing =====
 
 
+def refused_results(assertions: list[dict[str, Any]]) -> list[AssertionResult]:
+    """Mark every configured assertion as errored because the model refused.
+
+    A refused cell has no output to assert against, so no assertion is a
+    verdict about it. `error` is exactly the existing state for that - it
+    means "couldn't run, so not a verdict either way" and is excluded from
+    both halves of the pass ratio - which is why nothing downstream needs a
+    new concept.
+
+    This matters because four of the ten types PASS against an empty string:
+    `not_contains` finds nothing, `max_length_chars` sees zero characters,
+    and `latency_under` / `cost_under` compare real numbers that a refusal
+    genuinely has. A CI gate built from those alone reports a 100% pass rate
+    on a request that was declined and billed. Erroring them instead leaves
+    the denominator empty, so `pass_rate` is None and the existing
+    "nothing was verified" gate exits 1.
+    """
+    out: list[AssertionResult] = []
+    for raw in assertions:
+        raw_type = raw.get("type", "<unknown>") if isinstance(raw, dict) else "<unknown>"
+        out.append(
+            AssertionResult(
+                type=str(raw_type),
+                passed=False,
+                expected=None,
+                actual=None,
+                message="not evaluated: the model refused",
+                error="model refused; no output to assert against",
+            )
+        )
+    return out
+
+
 def parse_assertion_config(raw: Any) -> AssertionConfig:
     """Validate a raw dict from a JSON batch file's `assertions` array.
 
