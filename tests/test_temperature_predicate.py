@@ -1,8 +1,12 @@
 """Tests for the rejects_sampling_params predicate and its wiring.
 
-Twelve models 400 unless temperature is exactly the provider default; omitting
-the field always works. The predicate flags those twelve in PRICING and both
-request builders consult it.
+Seventeen models 400 unless temperature is exactly the provider default;
+omitting the field always works. The predicate flags those seventeen in
+PRICING and both request builders consult it.
+
+The count in the prose above and the assertion in
+`test_the_flagged_set_is_exactly_seventeen` drifted apart once - the text
+still said twelve while the assertion said sixteen. They move together.
 
 The default direction is load-bearing: ABSENT MEANS SEND. Anything not carrying
 the flag - the other registry entries, local ids, OpenRouter passthrough ids,
@@ -117,22 +121,71 @@ class ContractCheckingProvider(OpenAIProvider):
 
     def simulate(self, model: str, kwargs: dict[str, Any]) -> None:
         self.seen.append({"model": model, **kwargs})
-        if "temperature" in kwargs and rejects_sampling_params(model):
+        if sent_temperature(kwargs) is not None and rejects_sampling_params(model):
             raise AssertionError(
                 f"simulated 400: 'temperature' is not supported by {model}. "
                 f"Only the default value is supported."
             )
 
 
+def sent_temperature(kwargs: dict[str, Any]) -> float | None:
+    """The temperature a request actually carries, wherever it is placed.
+
+    Two shapes, one meaning. OpenAI-family providers pass `temperature` as a
+    top-level keyword; the Anthropic provider passes it inside `extra_body`,
+    because the SDK removed it from its typed signature in 1.x and a keyword
+    would raise TypeError before any HTTP call.
+
+    Every check here goes through this rather than reading `kwargs` directly.
+    Reading the top level only would have quietly stopped seeing Anthropic
+    temperatures the moment they moved - and the contract check below, whose
+    whole job is to catch a temperature reaching a model that rejects it,
+    would have passed vacuously ever after.
+    """
+    if "temperature" in kwargs:
+        return float(kwargs["temperature"])
+    extra = kwargs.get("extra_body")
+    if isinstance(extra, dict) and "temperature" in extra:
+        return float(extra["temperature"])
+    return None
+
+
 def _assert_contract(model: str, kwargs: dict[str, Any]) -> None:
     ContractCheckingProvider().simulate(model, kwargs)
+
+
+class TestTheContractCheckerCanActuallyFail:
+    """A checker nothing proves can fail is indistinguishable from a no-op.
+
+    `simulate` used to look for a top-level `temperature` key. When the
+    Anthropic provider moved the parameter into `extra_body`, that check would
+    have kept passing for every Anthropic model forever while catching
+    nothing. Both shapes are pinned here so the next relocation fails loudly.
+    """
+
+    def test_a_top_level_temperature_on_a_rejecting_model_raises(self) -> None:
+        with pytest.raises(AssertionError, match="simulated 400"):
+            _assert_contract("claude-opus-5", {"temperature": 0.7})
+
+    def test_an_extra_body_temperature_on_a_rejecting_model_raises(self) -> None:
+        with pytest.raises(AssertionError, match="simulated 400"):
+            _assert_contract("claude-opus-5", {"extra_body": {"temperature": 0.7}})
+
+    def test_omitting_it_entirely_is_what_passes(self) -> None:
+        _assert_contract("claude-opus-5", {"max_tokens": 8})
+
+    def test_sent_temperature_reads_both_shapes_and_neither(self) -> None:
+        assert sent_temperature({"temperature": 0.5}) == 0.5
+        assert sent_temperature({"extra_body": {"temperature": 0.5}}) == 0.5
+        assert sent_temperature({"max_tokens": 8}) is None
+        assert sent_temperature({"extra_body": {"top_p": 1}}) is None
 
 
 # ===== the predicate itself =====
 
 
 class TestPredicate:
-    def test_the_flagged_set_is_exactly_sixteen(self) -> None:
+    def test_the_flagged_set_is_exactly_seventeen(self) -> None:
         # A tripwire, not a fact about the registry's size: growing this number
         # must be a deliberate edit. Nine in 0.1.5; the three gpt-5.6 models
         # were measured 2026-08-07 and added.
@@ -140,7 +193,12 @@ class TestPredicate:
         # The four kimi rows were flagged from Moonshot's parameter reference,
         # not a measured 400 - no call has ever been made against that
         # provider.
-        assert len(REJECTING) == 16, REJECTING
+        #
+        # claude-fable-5-1 was flagged from a live probe rather than from this
+        # suite: temperature, top_p and top_k each returned a 400 reading
+        # "deprecated for this model". That is a measured 400, the bar this
+        # file sets - it just was not measured here.
+        assert len(REJECTING) == 17, REJECTING
 
     def test_no_entry_carries_a_false_flag(self) -> None:
         # Absent means send; an explicit False would be a confusing second way
@@ -193,7 +251,9 @@ def test_openai_rejecting_models_omit_temperature(model: str) -> None:
 )
 def test_unaffected_anthropic_models_send_temperature(model: str) -> None:
     kwargs = _anthropic_kwargs(model)
-    assert kwargs["temperature"] == 0.7, model
+    # Carried in extra_body since the 1.x SDK dropped the typed parameter.
+    assert kwargs["extra_body"] == {"temperature": 0.7}, model
+    assert sent_temperature(kwargs) == 0.7, model
     _assert_contract(model, kwargs)
 
 
@@ -477,7 +537,7 @@ class TestJudgeDegradation:
             )
         )
         # score_with_judge still asks for 0.0; the builder passes it through.
-        assert provider.wire_kwargs[0]["temperature"] == 0.0
+        assert sent_temperature(provider.wire_kwargs[0]) == 0.0
         assert results[0].degraded_models == []
 
     def test_mixed_panel_records_only_the_rejecting_judge(self) -> None:
@@ -1171,12 +1231,18 @@ class TestSignificanceTemperatureMixedJson:
 
 
 class TestCsvUntouchedByTheMixedKey:
-    """The key must not reach CSV; CSV_COLUMNS is byte-identical this change."""
+    """The key must not reach CSV.
+
+    CSV_COLUMNS was byte-identical when the mixed-sampling key landed. It is
+    23 columns since refusals added stop_reason and stop_category; what this
+    class pins is that `significance_temperature_mixed` is still not one of
+    them, and that the leading layout has not shifted.
+    """
 
     def test_csv_columns_unchanged(self) -> None:
         from cli_modelarium.output_formatters import CSV_COLUMNS
 
-        assert len(CSV_COLUMNS) == 21
+        assert len(CSV_COLUMNS) == 23
         assert "significance_temperature_mixed" not in CSV_COLUMNS
         assert CSV_COLUMNS[4] == "temperature"
 
