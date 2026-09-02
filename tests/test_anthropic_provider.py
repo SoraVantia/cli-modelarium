@@ -220,7 +220,10 @@ async def test_temperature_passed_through(monkeypatch: pytest.MonkeyPatch) -> No
 
     await provider.complete("p", "claude-sonnet-4-6", 0.7)
 
-    assert messages.last_kwargs["temperature"] == 0.7
+    # extra_body, not a keyword: 1.x removed temperature from the typed
+    # signature, so a keyword raises TypeError before any HTTP call.
+    assert messages.last_kwargs["extra_body"] == {"temperature": 0.7}
+    assert "temperature" not in messages.last_kwargs
 
 
 # ===== stream() iteration =====
