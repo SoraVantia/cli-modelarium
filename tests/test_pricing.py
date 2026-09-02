@@ -11,7 +11,7 @@ from cli_modelarium.exceptions import (
     RetiredModelError,
     UnknownModelError,
 )
-from cli_modelarium.models_registry import get_provider_for_model
+from cli_modelarium.models_registry import MODEL_GROUPS, get_provider_for_model
 from cli_modelarium.pricing import (
     PRICING,
     PRICING_AS_OF,
@@ -19,6 +19,7 @@ from cli_modelarium.pricing import (
     calculate_cost,
     is_local_model,
     pricing_freshness_note,
+    rejects_sampling_params,
 )
 
 
@@ -178,6 +179,64 @@ class TestPricingTableCoverage:
         entry = PRICING["claude-haiku-4-5"]
         assert entry["input"] == 1.00
         assert entry["output"] == 5.00
+
+
+class TestClaudeFable51:
+    """The row, and the one figure in it that reads as a typo."""
+
+    def test_the_row_carries_all_four_fields(self) -> None:
+        entry = PRICING["claude-fable-5-1"]
+        assert entry["input"] == 10.00
+        assert entry["output"] == 50.00
+        assert entry["cached_input"] == 0.25
+        assert entry["provider"] == "anthropic"
+
+    def test_the_cache_rate_is_two_and_a_half_percent_of_input(self) -> None:
+        """0.25 against 10.00 is 2.5%, where every other Claude row is 10%.
+
+        Pinned because it looks like a dropped digit and an editor "fixing" it
+        would silently quadruple every reported cache saving. Anthropic's
+        pricing page footnotes cache hits on Fable 5.1 and Mythos 5.1 at
+        0.025x base input, every other model at 0.1x.
+        """
+        entry = PRICING["claude-fable-5-1"]
+        assert entry["cached_input"] / entry["input"] == pytest.approx(0.025)
+
+        others = [
+            v
+            for m, v in PRICING.items()
+            if v.get("provider") == "anthropic"
+            and m != "claude-fable-5-1"
+            and v.get("cached_input")
+        ]
+        assert others, "expected other Anthropic rows with a cache rate"
+        assert all(
+            v["cached_input"] / v["input"] == pytest.approx(0.1) for v in others
+        )
+
+    def test_it_rejects_sampling_params(self) -> None:
+        # Measured live: temperature, top_p and top_k each returned a 400
+        # reading "deprecated for this model".
+        assert rejects_sampling_params("claude-fable-5-1") is True
+
+    def test_it_routes_to_the_anthropic_provider(self) -> None:
+        assert get_provider_for_model("claude-fable-5-1") == "anthropic"
+
+    def test_cost_matches_the_registered_rates(self) -> None:
+        # The figure a live CLI run produced: 18 input + 4 output tokens.
+        assert calculate_cost("claude-fable-5-1", 18, 4, 0) == pytest.approx(0.000380)
+
+    def test_a_cached_read_bills_at_the_lower_rate(self) -> None:
+        """1M cached input tokens cost $0.25, not $10.00 and not $1.00."""
+        assert calculate_cost("claude-fable-5-1", 1_000_000, 0, 1_000_000) == pytest.approx(0.25)
+
+    def test_it_is_not_in_any_static_group(self) -> None:
+        """Deliberate: all-flagship holds one model per provider and
+        claude-opus-5 has the Anthropic slot, so promoting Fable would double
+        the price of every all-flagship run. Users name it explicitly.
+        """
+        for group, members in MODEL_GROUPS.items():
+            assert "claude-fable-5-1" not in members, group
 
 
 class TestRetiredModels:
