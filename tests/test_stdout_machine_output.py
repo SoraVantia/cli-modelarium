@@ -165,11 +165,11 @@ class TestStdoutParses:
     ) -> None:
         # Header width alone is not enough in either direction. A leading
         # progress line makes the header one column; a trailing summary adds a
-        # ROW while leaving the header at 21. csv.reader raises for neither.
+        # ROW while leaving the header at 23. csv.reader raises for neither.
         result = CliRunner().invoke(cli_main, _batch_args(prompts_file, "csv"))
         assert result.exit_code == 0, result.output
         rows = _rows(result.stdout)
-        assert len(rows[0]) == 21, f"header should be the full column set, got {rows[0]}"
+        assert len(rows[0]) == 23, f"header should be the full column set, got {rows[0]}"
         assert len(rows) - 1 == 2, f"expected one row per prompt, got {len(rows) - 1}"
 
     def test_compare_json_stdout_parses(self, fixed_provider: _FixedProvider) -> None:
@@ -183,7 +183,7 @@ class TestStdoutParses:
         result = CliRunner().invoke(cli_main, _compare_args("csv"))
         assert result.exit_code == 0, result.output
         rows = _rows(result.stdout)
-        assert len(rows[0]) == 21
+        assert len(rows[0]) == 23
         assert len(rows) - 1 == 1
 
 
@@ -217,7 +217,7 @@ class TestJudgeToSDoesNotShareStdout:
         result = CliRunner().invoke(cli_main, _compare_args("csv", "--judge", "gpt-5.5"))
         assert result.exit_code == 0, result.output
         rows = _rows(result.stdout)
-        assert len(rows[0]) == 21
+        assert len(rows[0]) == 23
         assert len(rows) - 1 == 1
 
     def test_the_tos_panel_still_reaches_the_user(
@@ -246,7 +246,7 @@ class TestPayloadSurvivesANarrowTerminal:
         if fmt == "json":
             assert json.loads(result.stdout)["total_results"] == 2
         else:
-            assert len(_rows(result.stdout)[0]) == 21
+            assert len(_rows(result.stdout)[0]) == 23
 
     @pytest.mark.parametrize("fmt", ["json", "csv"])
     def test_compare_stdout_at_eighty_columns(
@@ -257,7 +257,7 @@ class TestPayloadSurvivesANarrowTerminal:
         if fmt == "json":
             assert json.loads(result.stdout)["total_results"] == 1
         else:
-            assert len(_rows(result.stdout)[0]) == 21
+            assert len(_rows(result.stdout)[0]) == 23
 
     def test_no_payload_line_is_clipped_to_the_terminal_width(
         self, fixed_provider: _FixedProvider, prompts_file: Path
