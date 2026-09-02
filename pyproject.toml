@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cli-modelarium"
-version = "0.1.8"
+version = "0.1.9"
 description = "Compare LLM outputs side by side from the terminal, with statistical significance testing, cost tracking and CI assertions. Twelve cloud providers plus local models."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -45,7 +45,9 @@ classifiers = [
 ]
 dependencies = [
     "openai~=2.38",
-    "anthropic>=0.104,<0.200",
+    # Floored at 1.3, not 1.0: only ever tested against 1.3.0; 1.0-1.2 have
+    # been run by nobody here.
+    "anthropic>=1.3,<2",
     "google-genai~=2.6",
     # The 2.4.7 floor excludes 2.4.6, withdrawn from PyPI after a malicious release; do not lower it.
     "mistralai>=2.4.7,<2.10.0",
