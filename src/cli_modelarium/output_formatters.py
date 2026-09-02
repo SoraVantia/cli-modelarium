@@ -63,6 +63,13 @@ CSV_COLUMNS: tuple[str, ...] = (
     "assertions_passed",
     "assertions_total",
     "assertions_failed_types",
+    # v0.1.9. A refused row carries stop_reason="refusal" with an empty
+    # `output` and an empty `error` - the two columns that tell it apart from
+    # a model that simply answered with nothing. `stop_category` is the
+    # provider's own label for the refusal and is an OPEN set: render it,
+    # never branch on it.
+    "stop_reason",
+    "stop_category",
 )
 
 
@@ -86,6 +93,11 @@ class BatchResult:
     output: str
     error: str | None
     retries: int
+    # The provider declined - see CompletionResult. `error` stays None on a
+    # refused row, which is what keeps its cost in every total here.
+    refused: bool = False
+    stop_reason: str | None = None
+    stop_category: str | None = None
     # The raw assertion configs from the user's input file. Always preserved
     # so JSON round-trips the user's intent even when assertions were skipped.
     assertions_raw: list[dict[str, Any]] = field(default_factory=list)
@@ -125,6 +137,9 @@ def state_to_result(
         output=state.text,
         error=state.error,
         retries=state.attempts,
+        refused=state.refused,
+        stop_reason=state.stop_reason,
+        stop_category=state.stop_category,
         assertions_raw=list(bp.assertions),
         judge_result=judge_result,
         assertion_results=assertion_results,
@@ -251,6 +266,8 @@ def _format_csv(
             "assertions_passed": _assertion_passed_cell(r),
             "assertions_total": _assertion_total_cell(r),
             "assertions_failed_types": _assertion_failed_types_cell(r),
+            "stop_reason": r.stop_reason or "",
+            "stop_category": r.stop_category or "",
         }
         if runs > 1:
             row["run_index"] = r.run_index
@@ -520,11 +537,17 @@ def _build_stats_by_cell(
     for key in insertion_order:
         cell = grouped[key]
         model, temp, sp = key
+        # Timing and cost are real measurements even when the model declined,
+        # so a refused row belongs in them. Anything derived from the OUTPUT
+        # does not: a refusal contributes an empty string, and counting it
+        # makes a cell that answered nothing look perfectly consistent.
         latencies = [r.latency_ms for r in cell if r.error is None and r.latency_ms is not None]
-        token_counts = [r.output_tokens for r in cell if r.error is None]
         costs = [r.cost_usd for r in cell if r.error is None]
-        outputs = [r.output for r in cell if r.error is None]
-        n_succeeded = sum(1 for r in cell if r.error is None)
+        answered = [r for r in cell if r.error is None and not r.refused]
+        token_counts = [r.output_tokens for r in answered]
+        outputs = [r.output for r in answered]
+        n_succeeded = len(answered)
+        n_refused = sum(1 for r in cell if r.error is None and r.refused)
         n_failed = sum(1 for r in cell if r.error is not None)
 
         if len(latencies) >= 2:
@@ -550,6 +573,7 @@ def _build_stats_by_cell(
             "system": sp,
             "n_runs": len(cell),
             "n_succeeded": n_succeeded,
+            "n_refused": n_refused,
             "n_failed": n_failed,
             "latency_mean_ms": _safe_mean(latencies),
             "latency_stdev_ms": stdev,
@@ -609,6 +633,12 @@ def _result_to_dict(r: BatchResult, include_run_index: bool = False) -> dict[str
         "output": r.output,
         "error": r.error,
         "retries": r.retries,
+        # Always emitted, so a consumer can read them directly rather than
+        # treat absence as "not refused" - which an older version's output
+        # would be indistinguishable from.
+        "refused": r.refused,
+        "stop_reason": r.stop_reason,
+        "stop_category": r.stop_category,
         "assertions": r.assertions_raw,
     }
     if include_run_index:
@@ -785,7 +815,7 @@ def _format_markdown(
             ttft = f"{r.ttft_ms:.1f}" if r.ttft_ms is not None else "-"
             latency = f"{r.latency_ms:.1f}" if r.latency_ms is not None else "-"
             cost = "Free" if is_local_model(r.model) else f"${r.cost_usd:.6f}"
-            status = "ok" if r.error is None else "error"
+            status = "error" if r.error is not None else ("refused" if r.refused else "ok")
             cells = [
                 f"`{r.model}`",
                 f"{r.temperature:.1f}",
@@ -822,7 +852,10 @@ def _format_markdown(
                 lines.append(f"> error: {r.error}")
             else:
                 lines.append("```")
-                lines.append(r.output if r.output else "(no output)")
+                if r.output:
+                    lines.append(r.output)
+                else:
+                    lines.append("(refused)" if r.refused else "(no output)")
                 lines.append("```")
             lines.append("")
 
