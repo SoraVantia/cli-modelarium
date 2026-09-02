@@ -37,7 +37,16 @@ from cli_modelarium.pricing import is_local_model
 from cli_modelarium.providers.base import BaseProvider, CompletionResult
 from cli_modelarium.security import redact_secrets
 
+# One value applied to every provider, which cannot be right for all of them:
+# Moonshot's Tier0 allows 1 concurrent request and its Tier1 allows 50. 5 is
+# low enough not to trip the strictest tier on a small run and high enough to
+# be worth having. --concurrency overrides it per run.
 DEFAULT_CONCURRENCY = 5
+
+# Retries, not attempts: `range(max_retries + 1)` makes this four tries. With
+# RATE_LIMIT_BASE_DELAY_SECONDS doubling each time, a cell that is going to
+# fail spends about seven seconds (1 + 2 + 4) before saying so, which is the
+# ceiling on how long a run hangs on one exhausted quota.
 DEFAULT_MAX_RETRIES = 3
 
 # Auto-collapse threshold for the live streaming display. Above this many
@@ -89,6 +98,11 @@ class StreamState:
     cached_tokens: int = 0
     cost_usd: float = 0.0
     error: str | None = None
+    # Set when the provider declined the request: HTTP 200, real cost, no
+    # answer. Deliberately NOT folded into `error` - see CompletionResult.
+    refused: bool = False
+    stop_reason: str | None = None
+    stop_category: str | None = None
     retry_message: str | None = None
     attempts: int = 0  # number of retries attempted (0 == first call only)
     _start: float | None = field(default=None, repr=False)
@@ -105,7 +119,12 @@ class StreamState:
         self.text += chunk
 
     def mark_complete(self, result: CompletionResult) -> None:
-        self.status = "complete"
+        self.refused = result.refused
+        self.stop_reason = result.stop_reason
+        self.stop_category = result.stop_category
+        # "refused" is a third terminal status beside complete and error: the
+        # call succeeded and was billed, but produced no answer.
+        self.status = "refused" if result.refused else "complete"
         self.input_tokens = result.input_tokens
         self.output_tokens = result.output_tokens
         self.cached_tokens = result.cached_tokens
@@ -194,6 +213,11 @@ class StreamingDisplay:
             else:
                 parts.append(f"${state.cost_usd:.6f}")
             status_text = f"[green]done[/green]  [dim]{'  '.join(parts)}[/dim]"
+        elif state.status == "refused":
+            # The cost is shown because a refusal is billed. The category is
+            # rendered verbatim - it is an open set and never branched on.
+            cat = f"  {state.stop_category}" if state.stop_category else ""
+            status_text = f"[yellow]refused{cat}[/yellow]  [dim]${state.cost_usd:.6f}[/dim]"
         elif state.status == "error":
             status_text = "[red]error[/red]"
         else:
@@ -222,6 +246,7 @@ class StreamingDisplay:
         border_style = {
             "complete": "green",
             "error": "red",
+            "refused": "yellow",
             "retrying": "yellow",
             "streaming": "cyan",
         }.get(state.status, "dim")
