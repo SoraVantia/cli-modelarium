@@ -13,6 +13,11 @@ The contract: pass a list of StreamState objects representing N runs of
 the SAME (model, temperature, system_prompt) cell. Returns a RunStats
 dataclass with all metrics computed only on successful runs.
 
+Refused runs (state.refused) are counted in n_refused. They keep their timing
+and cost - those were really measured and really billed - but are excluded from
+everything derived from the output, because a refusal contributes an empty
+string and would read as perfect consistency.
+
 Failed runs (state.error is not None) are counted in n_failed but excluded
 from all numerical statistics. n_succeeded < 2 means stdev is undefined
 and returned as None.
@@ -48,7 +53,11 @@ class RunStats:
     """
 
     n_runs: int
+    # Runs that produced an answer. A refusal is NOT one: it is billed but
+    # answered nothing, and counting it here would put it in the denominator
+    # of output_diversity.
     n_succeeded: int
+    n_refused: int
     n_failed: int
 
     # Timing statistics
@@ -80,15 +89,23 @@ def compute_run_stats(states: list[StreamState]) -> RunStats:
     counted in n_failed but don't contribute to means/stdevs.
     """
     n_runs = len(states)
-    successful = [s for s in states if s.error is None]
+    # `billed` = the call reached the provider and was charged, refusals
+    # included. `answered` = it also produced an answer. Timing and cost are
+    # real measurements for a refusal and belong in the first group; anything
+    # derived from the output belongs in the second, because a refusal
+    # contributes an empty string and would make a cell that answered nothing
+    # read as maximally consistent.
+    billed = [s for s in states if s.error is None]
+    answered = [s for s in billed if not s.refused]
     failed = [s for s in states if s.error is not None]
-    n_succeeded = len(successful)
+    n_succeeded = len(answered)
+    n_refused = len(billed) - len(answered)
     n_failed = len(failed)
 
-    latencies = [s.latency_ms for s in successful if s.latency_ms is not None]
-    ttfts = [s.ttft_ms for s in successful if s.ttft_ms is not None]
-    output_token_counts = [s.output_tokens for s in successful]
-    costs = [s.cost_usd for s in successful]
+    latencies = [s.latency_ms for s in billed if s.latency_ms is not None]
+    ttfts = [s.ttft_ms for s in billed if s.ttft_ms is not None]
+    output_token_counts = [s.output_tokens for s in answered]
+    costs = [s.cost_usd for s in billed]
 
     latency_mean_ms = stdlib_statistics.mean(latencies) if latencies else None
     latency_median_ms = stdlib_statistics.median(latencies) if latencies else None
@@ -114,7 +131,7 @@ def compute_run_stats(states: list[StreamState]) -> RunStats:
     cost_mean_usd = stdlib_statistics.mean(costs) if costs else None
 
     # Output frequency analysis (exact string matching, no normalization).
-    outputs = [s.text for s in successful]
+    outputs = [s.text for s in answered]
     output_counter = Counter(outputs)
     unique_outputs = len(output_counter)
 
@@ -133,6 +150,7 @@ def compute_run_stats(states: list[StreamState]) -> RunStats:
     return RunStats(
         n_runs=n_runs,
         n_succeeded=n_succeeded,
+        n_refused=n_refused,
         n_failed=n_failed,
         latency_mean_ms=latency_mean_ms,
         latency_median_ms=latency_median_ms,
@@ -403,7 +421,10 @@ def _cell_deduped_score(
     while the broadcast verdicts are a single shared object, and stops the
     moment anything copies them.
     """
-    if state.error is not None:
+    if state.error is not None or state.refused:
+        # A refused cell has no candidate to score. The judge returns None for
+        # it anyway; dropping it here keeps the sample honest instead of
+        # relying on that.
         return None
     score = scores_by_state_id.get(id(state))
     if score is None:
@@ -445,15 +466,16 @@ def _extract_metric_samples(
         return samples
 
     for model, states in states_by_model.items():
-        successful = [s for s in states if s.error is None]
+        # Latency and cost were really measured and really billed on a
+        # refusal; output_tokens was not an answer, so refusals are dropped
+        # from that metric only.
+        billed = [s for s in states if s.error is None]
         if metric == "latency_ms":
-            samples[model] = [
-                float(s.latency_ms) for s in successful if s.latency_ms is not None
-            ]
+            samples[model] = [float(s.latency_ms) for s in billed if s.latency_ms is not None]
         elif metric == "output_tokens":
-            samples[model] = [float(s.output_tokens) for s in successful]
+            samples[model] = [float(s.output_tokens) for s in billed if not s.refused]
         elif metric == "cost_usd":
-            samples[model] = [float(s.cost_usd) for s in successful]
+            samples[model] = [float(s.cost_usd) for s in billed]
         else:
             raise ValueError(f"Unknown metric: {metric}")
     return samples
@@ -940,21 +962,19 @@ def _extract_paired_metric_samples(
         return samples_by_model
 
     for model, states in states_by_model.items():
-        successful = [s for s in states if s.error is None]
+        # Same split as the independent path: refusals keep their timing and
+        # cost, but are not an output sample.
+        billed = [s for s in states if s.error is None]
         if metric == "latency_ms":
             samples_by_model[model] = {
-                _pair_key(s): float(s.latency_ms)
-                for s in successful
-                if s.latency_ms is not None
+                _pair_key(s): float(s.latency_ms) for s in billed if s.latency_ms is not None
             }
         elif metric == "output_tokens":
             samples_by_model[model] = {
-                _pair_key(s): float(s.output_tokens) for s in successful
+                _pair_key(s): float(s.output_tokens) for s in billed if not s.refused
             }
         elif metric == "cost_usd":
-            samples_by_model[model] = {
-                _pair_key(s): float(s.cost_usd) for s in successful
-            }
+            samples_by_model[model] = {_pair_key(s): float(s.cost_usd) for s in billed}
         else:
             raise ValueError(f"Unknown metric: {metric}")
     return samples_by_model
@@ -1061,7 +1081,8 @@ def compute_mcnemar_pairwise(
     for model, states in states_by_model.items():
         m: dict[int, bool] = {}
         for s in states:
-            if s.error is not None:
+            if s.error is not None or s.refused:
+                # A refusal is neither a hallucination pass nor a fail.
                 continue
             jr = judge_by_state_id.get(id(s))
             if jr is None or not getattr(jr, "judges", None):
