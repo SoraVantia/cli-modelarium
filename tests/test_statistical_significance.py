@@ -210,6 +210,9 @@ class _MockState:
     output_tokens: int = 10
     cost_usd: float = 0.001
     error: str | None = None
+    # StreamState carries this, so the stub does too: the significance paths
+    # read it to keep refusals out of output-derived samples.
+    refused: bool = False
 
 
 class TestComputePairwiseSignificance:
