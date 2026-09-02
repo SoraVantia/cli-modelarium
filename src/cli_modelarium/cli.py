@@ -22,6 +22,7 @@ from cli_modelarium.assertions import (
     ERROR_MARK,
     AssertionResult,
     count_assertion_totals,
+    refused_results,
     run_assertions,
 )
 from cli_modelarium.banner import render_banner, should_show_banner
@@ -1181,6 +1182,13 @@ def batch(
     for state, bp in pairs:
         if no_assertions or state.error:
             assertion_results_per_state.append(None)
+        elif state.refused and bp.assertions:
+            # The call succeeded and was billed but produced no answer, so no
+            # assertion is a verdict about it. Erroring them (rather than
+            # running them against "") stops four of the ten types passing
+            # vacuously and leaves pass_rate undefined, which the existing
+            # "nothing was verified" gate turns into exit 1.
+            assertion_results_per_state.append(refused_results(bp.assertions))
         elif not bp.assertions:
             assertion_results_per_state.append([])
         else:
@@ -1212,7 +1220,10 @@ def batch(
     )
 
     failed = sum(1 for r in results if r.error)
-    success = len(results) - failed
+    refused = sum(1 for r in results if r.error is None and r.refused)
+    success = len(results) - failed - refused
+    # Refusals keep their cost: `error` stays None on them precisely so this
+    # total, and the two others like it, still charge for what was billed.
     total_cost = sum(r.cost_usd for r in results if r.error is None)
 
     # Tally assertion outcomes. `error` rows are excluded from both numerator
@@ -1225,8 +1236,12 @@ def batch(
     summary_parts = [
         f"[green]{success} succeeded[/green]",
         f"[red]{failed} failed[/red]",
-        f"[dim]total cost ${total_cost:.6f}[/dim]",
     ]
+    # Only shown when it happened: a "0 refused" on every ordinary run would
+    # be noise, and the succeeded/failed pair has always been unconditional.
+    if refused:
+        summary_parts.append(f"[yellow]{refused} refused[/yellow]")
+    summary_parts.append(f"[dim]total cost ${total_cost:.6f}[/dim]")
     if judge_results is not None:
         j_cost = total_judge_cost(judge_results)
         j_calls = total_judge_calls(judge_results)
@@ -1427,14 +1442,16 @@ async def _run_mode_only_judging(
         chosen: StreamState | None = None
         if stats.mode_output is not None:
             for s in cell_states:
-                if s.error is None and s.text == stats.mode_output:
+                if s.error is None and not s.refused and s.text == stats.mode_output:
                     chosen = s
                     break
         if chosen is None:
-            # No mode (all unique) or all failed: fall back to first
-            # successful state; if none, the cell stays unjudged.
+            # No mode (all unique) or all failed: fall back to first state
+            # that actually answered; if none, the cell stays unjudged.
+            # A refused run is never chosen - judging it would spend a real
+            # judge call to score nothing and get back "empty response".
             for s in cell_states:
-                if s.error is None:
+                if s.error is None and not s.refused:
                     chosen = s
                     break
         if chosen is not None:
@@ -2690,7 +2707,9 @@ def _display_results(
             in_text = "[dim]-[/dim]"
             out_text = "[dim]-[/dim]"
         else:
-            status = "[green]ok[/green]"
+            # A refusal reached the provider and was billed, so it keeps its
+            # cost and its timings - only the verdict differs from "ok".
+            status = "[yellow]refused[/yellow]" if s.refused else "[green]ok[/green]"
             total_cost += s.cost_usd
             cost_text = "[dim]Free[/dim]" if is_local_model(s.model) else f"${s.cost_usd:.6f}"
             ttft_text = f"{s.ttft_ms / 1000:.2f}s" if s.ttft_ms is not None else "[dim]-[/dim]"
