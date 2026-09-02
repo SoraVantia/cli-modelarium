@@ -26,6 +26,17 @@ class CompletionResult:
     provider: str = ""
     temperature: float = 0.0
     error: str | None = None
+    # A provider declined the request: the call SUCCEEDED at the transport
+    # level (HTTP 200) and was billed, but no answer was produced. Kept
+    # strictly separate from `error`, which means the call itself failed and
+    # cost nothing - conflating them would drop a real charge out of every
+    # cost total and report a 200 as a call failure.
+    refused: bool = False
+    # Why generation stopped, verbatim from the provider, and the provider's
+    # own category for a refusal. `stop_category` is an OPEN set: store and
+    # render it as an opaque string, never branch on its value.
+    stop_reason: str | None = None
+    stop_category: str | None = None
 
 
 # Type alias for the per-chunk callback that the streaming orchestrator passes in.
