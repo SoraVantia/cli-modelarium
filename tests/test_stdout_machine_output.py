@@ -31,6 +31,7 @@ import pytest
 from click.testing import CliRunner
 
 from cli_modelarium.cli import main as cli_main
+from cli_modelarium.output_formatters import CSV_COLUMNS
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
 
 # Long enough to exceed 80 columns once serialized, and non-ASCII with a
@@ -141,9 +142,17 @@ def _rows(text: str) -> list[list[str]]:
 # comparing whole payloads; every other byte still has to match exactly.
 _TTFT = re.compile(rb'("ttft_ms":\s*)[0-9.eE+-]+|(?<=,)\d+\.\d{6,}(?=,)')
 
+# `run_id` and `started_at` are the same category as `ttft_ms`: per-invocation
+# by construction. These tests check DESTINATION parity - stdout against the
+# `--output` file - but can only do it by running the command twice, so run
+# identity differs for the reason it exists. `experiment_key` and `invocation`
+# are deliberately NOT masked: they must be identical across the two runs, and
+# leaving them unmasked is what proves it.
+_IDENTITY = re.compile(rb'("(?:run_id|started_at)":\s*)"[^"]*"')
+
 
 def _mask_measured(payload: bytes) -> bytes:
-    return _TTFT.sub(rb"\1<measured>", payload)
+    return _IDENTITY.sub(rb"\1<identity>", _TTFT.sub(rb"\1<measured>", payload))
 
 
 # ===== 4a / 4b: stdout parses, in both formats =====
@@ -169,7 +178,7 @@ class TestStdoutParses:
         result = CliRunner().invoke(cli_main, _batch_args(prompts_file, "csv"))
         assert result.exit_code == 0, result.output
         rows = _rows(result.stdout)
-        assert len(rows[0]) == 23, f"header should be the full column set, got {rows[0]}"
+        assert rows[0] == list(CSV_COLUMNS), f"header should be the full column set, got {rows[0]}"
         assert len(rows) - 1 == 2, f"expected one row per prompt, got {len(rows) - 1}"
 
     def test_compare_json_stdout_parses(self, fixed_provider: _FixedProvider) -> None:
@@ -183,7 +192,7 @@ class TestStdoutParses:
         result = CliRunner().invoke(cli_main, _compare_args("csv"))
         assert result.exit_code == 0, result.output
         rows = _rows(result.stdout)
-        assert len(rows[0]) == 23
+        assert rows[0] == list(CSV_COLUMNS)
         assert len(rows) - 1 == 1
 
 
@@ -217,7 +226,7 @@ class TestJudgeToSDoesNotShareStdout:
         result = CliRunner().invoke(cli_main, _compare_args("csv", "--judge", "gpt-5.5"))
         assert result.exit_code == 0, result.output
         rows = _rows(result.stdout)
-        assert len(rows[0]) == 23
+        assert rows[0] == list(CSV_COLUMNS)
         assert len(rows) - 1 == 1
 
     def test_the_tos_panel_still_reaches_the_user(
@@ -246,7 +255,7 @@ class TestPayloadSurvivesANarrowTerminal:
         if fmt == "json":
             assert json.loads(result.stdout)["total_results"] == 2
         else:
-            assert len(_rows(result.stdout)[0]) == 23
+            assert _rows(result.stdout)[0] == list(CSV_COLUMNS)
 
     @pytest.mark.parametrize("fmt", ["json", "csv"])
     def test_compare_stdout_at_eighty_columns(
@@ -257,7 +266,7 @@ class TestPayloadSurvivesANarrowTerminal:
         if fmt == "json":
             assert json.loads(result.stdout)["total_results"] == 1
         else:
-            assert len(_rows(result.stdout)[0]) == 23
+            assert _rows(result.stdout)[0] == list(CSV_COLUMNS)
 
     def test_no_payload_line_is_clipped_to_the_terminal_width(
         self, fixed_provider: _FixedProvider, prompts_file: Path
