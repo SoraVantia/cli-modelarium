@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cli_modelarium.cli import main
+from cli_modelarium.cli import run
 
 if __name__ == "__main__":
-    main()
+    run()
