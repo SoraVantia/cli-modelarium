@@ -20,6 +20,7 @@ from mistralai.client.errors.sdkerror import SDKError
 from cli_modelarium.exceptions import (
     AuthenticationError,
     ProviderError,
+    ProviderOverloadedError,
     RateLimitError,
 )
 from cli_modelarium.providers.mistral_provider import MistralProvider
@@ -200,6 +201,18 @@ async def test_401_translated_to_authentication_error(monkeypatch: pytest.Monkey
         await provider.complete("p", "mistral-large-latest", 0.0)
 
     assert exc_info.value.provider == "mistral"
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+async def test_transient_5xx_is_retryable(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    """Mistral had its own mapping with no overload branch at all."""
+    err = _sdk_error(status, "upstream unavailable")
+    provider, _ = _make_provider(monkeypatch, error=err)
+
+    with pytest.raises(ProviderOverloadedError):
+        await provider.complete("p", "mistral-medium-latest", 0.0)
 
 
 async def test_429_translated_to_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
