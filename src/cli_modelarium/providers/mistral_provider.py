@@ -24,10 +24,11 @@ from mistralai.client.errors.sdkerror import SDKError
 from cli_modelarium.exceptions import (
     AuthenticationError,
     ProviderError,
+    ProviderOverloadedError,
     RateLimitError,
 )
 from cli_modelarium.pricing import calculate_cost
-from cli_modelarium.providers._utils import extract_retry_after
+from cli_modelarium.providers._utils import TRANSIENT_STATUS_CODES, extract_retry_after
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
 from cli_modelarium.security import redact_secrets
 
@@ -134,6 +135,8 @@ class MistralProvider(BaseProvider):
         if status_code == 429:
             retry_after = extract_retry_after(error)
             raise RateLimitError(message, provider=self.name, retry_after=retry_after) from None
+        if status_code in TRANSIENT_STATUS_CODES:
+            raise ProviderOverloadedError(message, provider=self.name) from None
         raise ProviderError(message, provider=self.name) from None
 
 
