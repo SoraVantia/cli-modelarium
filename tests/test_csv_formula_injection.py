@@ -144,7 +144,30 @@ class TestOrdinaryOutputIsUnchanged:
     def test_a_normal_result_is_byte_identical(self) -> None:
         # Nothing that does not begin with a formula character may move.
         text = _format_csv([_result()])
-        expected = "p1,what is 2+2?,,gpt-5.5,0.0,850.0,120.0,10,5,0,0.001,4,,0,,,0,,,,,,"
+        # Built from the column list, not retyped. The old literal ended in six
+        # consecutive commas and had to be recounted by eye on every append.
+        from cli_modelarium.output_formatters import CSV_COLUMNS
+
+        populated = {
+            "prompt_id": "p1",
+            "prompt": "what is 2+2?",
+            "model": "gpt-5.5",
+            "temperature": "0.0",
+            "latency_ms": "850.0",
+            "ttft_ms": "120.0",
+            "input_tokens": "10",
+            "output_tokens": "5",
+            "cached_tokens": "0",
+            "cost_usd": "0.001",
+            "output": "4",
+            "retries": "0",
+            "judge_count": "0",
+            # `provider` is empty because this fixture builds a BatchResult
+            # directly rather than through state_to_result; `status` is derived,
+            # so it is populated on every row.
+            "status": "ok",
+        }
+        expected = ",".join(populated.get(c, "") for c in CSV_COLUMNS)
         assert _data_row(text) == expected
 
     def test_an_interior_equals_is_left_alone(self) -> None:
@@ -206,13 +229,16 @@ class TestTheComparePathIsCovered:
 
 
 class TestTheColumnContractIsUnchanged:
-    def test_header_is_the_canonical_23(self) -> None:
+    def test_header_starts_with_the_frozen_v019_prefix(self) -> None:
         from cli_modelarium.output_formatters import CSV_COLUMNS
+        from tests.conftest import V019_COLUMNS
 
         header = next(csv.reader(io.StringIO(_format_csv([_result()]))))
         assert tuple(header) == CSV_COLUMNS
-        assert len(header) == 23
+        assert tuple(header[: len(V019_COLUMNS)]) == V019_COLUMNS
 
-    def test_a_defused_row_still_has_23_fields(self) -> None:
+    def test_a_defused_row_has_one_field_per_column(self) -> None:
+        from cli_modelarium.output_formatters import CSV_COLUMNS
+
         rows = list(csv.reader(io.StringIO(_format_csv([_result(output=HYPERLINK_PAYLOAD)]))))
-        assert len(rows[1]) == 23
+        assert len(rows[1]) == len(CSV_COLUMNS)
