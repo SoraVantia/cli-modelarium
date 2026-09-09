@@ -9,6 +9,7 @@ import pytest
 from click.testing import CliRunner
 
 from cli_modelarium.cli import main as cli_main
+from cli_modelarium.pricing import is_local_model
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
 
 
@@ -52,7 +53,13 @@ class _RecordingProvider(BaseProvider):
             output=text,
             input_tokens=10,
             output_tokens=5,
-            cost_usd=0.000123,
+            # A local model really does report $0 - `calculate_cost` reads
+            # PRICING, where `local/*` is free. The stub used to charge for one,
+            # which contradicted `test_max_cost_zero_with_local_succeeds`'s own
+            # docstring and only passed because nothing checked the cost at
+            # runtime. Now that --max-cost is enforced during the run, the stub
+            # has to bill the way the tool does.
+            cost_usd=0.0 if is_local_model(model) else 0.000123,
             latency_ms=42.0,
             ttft_ms=12.0,
             model=model,
