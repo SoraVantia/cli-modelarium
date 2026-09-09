@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import math
+import platform
 import sys
+import traceback
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -13,6 +16,7 @@ import click
 import httpx
 import keyring.errors
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
@@ -41,6 +45,17 @@ from cli_modelarium.batch import (
     output_overlaps_input,
     run_batch,
 )
+from cli_modelarium.diffing import (
+    CONSOLE_METRICS,
+    MAX_PAYLOAD_BYTES,
+    DiffResult,
+    MetricDelta,
+    PayloadError,
+    diff_payloads,
+    load_payload,
+    ordering_warning,
+    to_json,
+)
 from cli_modelarium.exceptions import (
     BatchSizeError,
     BatchValidationError,
@@ -57,7 +72,7 @@ from cli_modelarium.hallucination import (
     parse_hallucination_response,
     resolve_hallucination_config,
 )
-from cli_modelarium.io_safety import load_system_prompt, split_escaped_csv
+from cli_modelarium.io_safety import load_system_prompt, safe_input_path, split_escaped_csv
 from cli_modelarium.judging import (
     DEFAULT_CRITERIA,
     JUDGE_PROMPT_TEMPLATE,
@@ -73,10 +88,21 @@ from cli_modelarium.models_registry import (
     parse_models_arg,
 )
 from cli_modelarium.output_formatters import (
+    CI_CONSOLE_LABELS,
+    CI_METRIC_ORDER,
+    STATUS_CANCELLED,
     BatchResult,
+    ci_cell_label,
+    ci_prompt_indices,
+    format_ci_value,
+    mcnemar_pairing_caveat,
+    refused_arms,
     render_markdown_to_console,
+    significance_refusal_caveat,
     significance_temperature_caveat,
     state_to_result,
+    status_word,
+    untestable_pairs_notice,
     write_csv,
     write_json,
     write_markdown,
@@ -90,6 +116,7 @@ from cli_modelarium.pricing import (
 )
 from cli_modelarium.providers.base import BaseProvider
 from cli_modelarium.providers.local_provider import LocalProvider
+from cli_modelarium.run_identity import build_run_identity, utc_now_iso
 from cli_modelarium.security import (
     KEY_PATTERNS,
     delete_key,
@@ -102,6 +129,7 @@ from cli_modelarium.security import (
 )
 from cli_modelarium.streaming import (
     DEFAULT_CONCURRENCY,
+    CostLedger,
     StreamState,
     run_streaming_comparison,
 )
@@ -125,12 +153,79 @@ PROVIDER_REGISTRY: dict[str, str] = {
     "local": "cli_modelarium.providers.local_provider:LocalProvider",
 }
 
-# Exit codes used across the CLI (matches CI/CD conventions).
+# Exit codes used across the CLI.
 EXIT_OK = 0
 EXIT_ASSERTION_FAILED = 1  # batch mode: at least one assertion failed
 EXIT_CALL_FAILED = 2
+# The cost ceiling stopped the run. Its own code rather than folding into 2:
+# every other route to 2 - a usage error, a missing key, an unknown model, the
+# pre-flight refusal - has nothing run and nothing spent, and the remedy is to
+# fix the command. A cost abort is the opposite. The run partly succeeded, money
+# was spent, and a real artifact is on disk; the remedy is to accept the partial
+# data or raise the ceiling. A CI job routing 2 to "the author typed something
+# wrong" would misroute it.
+EXIT_COST_CEILING = 3
+# Interrupted by SIGINT. 128 + 2 is the POSIX convention, and the point is
+# that it is NOT 1: exit 1 is EXIT_ASSERTION_FAILED, so a run killed by a CI
+# timeout used to report the code meaning "an assertion did not pass".
+#
+# The partial run is deliberately NOT published, which is the opposite of
+# what the cost ceiling does, and the difference is real rather than an
+# oversight. The ceiling stops BETWEEN cells: it lets every in-flight call
+# finish, so the states it publishes are complete and their costs are known.
+# SIGINT lands wherever it lands, including mid-stream - and usage is read
+# inside the provider's chunk loop, so an interrupted cell has no usage and
+# `mark_error` leaves `cost_usd` at 0.0. Writing that file would under-report
+# what was actually spent, which is the failure the truncated-run design
+# exists to avoid. Publishing on SIGINT is worth doing only once an
+# interrupted cell can say its cost is unknown rather than zero.
+EXIT_INTERRUPTED = 130
+# `diff` found a difference. Its own code, and NOT one of the four above,
+# because every one of those means something went wrong: 1 is an assertion
+# failure, 2 is a run that could not complete, 3 is a spend abort. A diff that
+# reports movement did none of those - it succeeded, and what it found is a
+# true fact about two files. Reusing 1 would repeat exactly the misrouting that
+# earned EXIT_INTERRUPTED its own code, with a CI job reading "something moved"
+# as "an assertion did not pass".
+#
+# `diff` still exits 2 when it cannot compare at all - a malformed file, a file
+# that is not a payload, a pair whose prompts or run counts differ. That is
+# "the run could not complete", which is what 2 already means.
+EXIT_DIFF_CHANGED = 4
 
-console = Console()
+class FiniteFloatRange(click.FloatRange):
+    """A `FloatRange` that also refuses NaN and the infinities.
+
+    `click.FloatRange` accepts NaN, because every comparison with NaN is False
+    and so neither bound ever trips. That was not a cosmetic hole: `--max-cost
+    nan` made `estimated > max_cost` always False and silently disabled the cost
+    gate, and `--ci-level nan` wrote `NaN` into the JSON payload, which RFC 8259
+    has no syntax for - a strict parser rejects the file, and `jq`, the recipe
+    the READMEs document, silently reads it as `null`.
+
+    The tool's own hand-rolled `not (0.0 <= x <= 1.0)` check on `--min-pass-rate`
+    was already immune for the same reason click's is not, which is what this is
+    modelled on. Applied to every FloatRange flag rather than to the ones that
+    were reported.
+    """
+
+    name = "finite float"
+
+    def convert(self, value, param, ctx):  # type: ignore[no-untyped-def]
+        converted = super().convert(value, param, ctx)
+        if not math.isfinite(converted):
+            self.fail(f"{value!r} is not a finite number.", param, ctx)
+        return converted
+
+
+# `emoji=False` because escaping cannot reach this one. Rich substitutes
+# `:word:` shortcodes AFTER markup parsing, and `escape` never touches a colon,
+# so a model id or an answer containing `:free:` rendered as an emoji however
+# well it was escaped. Set on the Console rather than per-print: the per-print
+# kwarg does not reach a string nested inside a Panel or a Table, and this does.
+# It costs nothing here - the tool writes no shortcodes of its own, and its
+# marks are literal characters rather than `:check:`-style names.
+console = Console(emoji=False)
 
 # Formats whose bytes a program parses rather than a person reads.
 MACHINE_FORMATS = frozenset({"json", "csv"})
@@ -303,7 +398,7 @@ def main(ctx: click.Context) -> None:
 )
 @click.option(
     "--max-cost",
-    type=click.FloatRange(min=0.0),
+    type=FiniteFloatRange(min=0.0),
     help="Refuse to run if estimated cost exceeds this USD (excludes judge cost).",
 )
 @click.option(
@@ -313,7 +408,13 @@ def main(ctx: click.Context) -> None:
 )
 @click.option(
     "--concurrency",
-    type=int,
+    # A minimum of 1, and deliberately no maximum. `asyncio.Semaphore(0)` is a
+    # valid semaphore that never admits anyone, so 0 hung forever with nothing
+    # printed; a negative value raised a bare ValueError that exited 1, the same
+    # code as a failed assertion. A ceiling would refuse a working
+    # configuration to prevent nothing: a Semaphore allocates no memory per
+    # slot, and a value above the task count is already a no-op.
+    type=click.IntRange(min=1),
     default=DEFAULT_CONCURRENCY,
     help=f"Max concurrent calls per provider (default: {DEFAULT_CONCURRENCY}).",
 )
@@ -356,7 +457,7 @@ def main(ctx: click.Context) -> None:
 )
 @click.option(
     "--significance-threshold",
-    type=click.FloatRange(0.0, 1.0, min_open=True, max_open=True),
+    type=FiniteFloatRange(0.0, 1.0, min_open=True, max_open=True),
     default=0.05,
     show_default=True,
     help=(
@@ -409,7 +510,7 @@ def main(ctx: click.Context) -> None:
 )
 @click.option(
     "--ci-level",
-    type=click.FloatRange(0.0, 1.0, min_open=True, max_open=True),
+    type=FiniteFloatRange(0.0, 1.0, min_open=True, max_open=True),
     default=0.95,
     show_default=True,
     help="Confidence level for bootstrap CIs (e.g. 0.95 for 95% CI).",
@@ -485,6 +586,13 @@ def compare(
     bootstrap_seed: int | None,
 ) -> None:
     """Run a side-by-side comparison of LLMs on a single prompt."""
+    # RUN START - the first statement of the body, before any resolution.
+    # Everything below can block on I/O of unbounded length (a keyring unlock,
+    # a local-server discovery round-trip), and `_format_json` is entered only
+    # after the last provider call returns, so a timestamp taken there is a
+    # finish time. Those two moments are seconds apart on a small run and
+    # minutes apart on `--models all-flagship --runs 10`.
+    started_at = utc_now_iso()
     try:
         model_list = parse_models_arg(models)
         if not model_list:
@@ -506,6 +614,20 @@ def compare(
             system_prompt_file=system_prompt_file,
         )
         judge_models = _resolve_judge_models(judge=judge, judges=judges)
+        # Built here rather than at write time: every value below is RESOLVED,
+        # so a run launched with `--models all-flagship` records the ids that
+        # actually ran. Group membership is registry state and moves between
+        # versions, so the group name alone would not let anyone reproduce it.
+        run_identity = build_run_identity(
+            command="compare",
+            started_at=started_at,
+            prompts=[prompt],
+            models=model_list,
+            temperatures=temp_list,
+            system_prompts=list(system_prompt_list),
+            judges=judge_models,
+            runs=runs,
+        )
         judge_criteria_list, judge_template_text = _resolve_judge_criteria_and_template(
             judge_criteria=judge_criteria,
             judge_template=judge_template,
@@ -592,6 +714,10 @@ def compare(
     def provider_factory(name: str) -> BaseProvider:
         return _get_provider_instance(name, local_url=local_url)
 
+    # One ledger for the whole run. Judge spend counts toward the same ceiling,
+    # which is a behaviour change: the pre-flight estimate never included it.
+    ledger = CostLedger(max_cost)
+
     async def _run_all() -> tuple[list[StreamState], list[JudgeResult] | None]:
         states = await run_streaming_comparison(
             prompt=prompt,
@@ -604,6 +730,7 @@ def compare(
             live_display=not no_stream,
             runs=runs,
             show_all_runs=show_all_runs,
+            ledger=ledger,
         )
         jrs: list[JudgeResult] | None = None
         if judge_models:
@@ -622,6 +749,7 @@ def compare(
                     template=judge_template_text,
                     provider_factory=provider_factory,
                     concurrency=concurrency,
+                    ledger=ledger,
                 )
             else:
                 jrs = await run_judging(
@@ -637,6 +765,7 @@ def compare(
                     ),
                     skip_self_eval=True,
                     concurrency=concurrency,
+                    ledger=ledger,
                 )
                 if hallucination_config is not None:
                     annotate_risk_levels(jrs)
@@ -646,6 +775,9 @@ def compare(
         # Single asyncio.run keeps all httpx client cleanup on one event loop,
         # so we don't get "Event loop is closed" warnings on shutdown.
         states, judge_results = asyncio.run(_run_all())
+    except KeyboardInterrupt:
+        _print_error("Interrupted. Nothing was written; calls already made were billed.")
+        sys.exit(EXIT_INTERRUPTED)
     except KeyNotConfiguredError as e:
         _print_error(str(e))
         sys.exit(EXIT_CALL_FAILED)
@@ -665,6 +797,12 @@ def compare(
         should_compute_ci = runs > 1
     else:
         should_compute_ci = confidence_intervals
+    # `and runs > 1` because the whole statistics block below is gated on it, so
+    # at a single run nothing is attempted whatever the flag says. Without this
+    # an unconditional methodology block would publish `enabled: true` with a
+    # complete 5000-resample BCa configuration and a pinned seed for a bootstrap
+    # that provably never ran - in a file people cite.
+    should_compute_ci = should_compute_ci and runs > 1
 
     significance_results = None
     stats_by_cell_with_ci: dict | None = None
@@ -706,7 +844,9 @@ def compare(
                     seed=bootstrap_seed,
                 )
             except ValueError as e:
-                console.print(f"[yellow]Significance test skipped: {e}[/yellow]")
+                console.print(
+                    f"[yellow]Significance test skipped: {escape(str(e))}[/yellow]"
+                )
                 significance_results = None
 
         if should_compute_ci:
@@ -740,28 +880,56 @@ def compare(
                 threshold=significance_threshold,
             )
 
-        # Record methodology metadata for reproducibility.
-        import scipy as _scipy
 
-        methodology = {
-            "tool_version": __version__,
-            "scipy_version": _scipy.__version__,
-            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
-            "n_runs": runs,
-            "bootstrap": {
-                "enabled": should_compute_ci,
-                "method": ci_method if should_compute_ci else None,
-                "n_resamples": bootstrap_resamples if should_compute_ci else None,
-                "ci_level": ci_level if should_compute_ci else None,
-                "seed": bootstrap_seed if should_compute_ci else None,
-            },
-            "significance": {
-                "enabled": bool(significance_results),
-                "test": significance_test if significance_results else None,
-                "correction": correction if significance_results else None,
-                "threshold": significance_threshold if significance_results else None,
-            },
-        }
+    # Recorded for reproducibility, UNCONDITIONALLY. It used to be built inside
+    # the `runs > 1` block, so a single-run payload carried no methodology at
+    # all and a consumer had to read that absence as "no statistics ran" -
+    # indistinguishable from a version that never emitted the key. The tool,
+    # scipy and Python versions are worth recording at one run too.
+    #
+    # COMPARE ONLY. `batch` builds no methodology and this does not give it one:
+    # batch has no `--runs`, calls no `run_statistics` function and never
+    # imports scipy, so a `scipy_version` there would name a library the command
+    # did not load.
+    import scipy as _scipy
+
+    # `{cell: {metric: {...}}}`, and a cell whose every metric was degenerate
+    # arrives as an empty inner dict, so the truth test has to reach the metric
+    # level rather than stopping at the cell.
+    produced_intervals = any(
+        bool(metrics) for metrics in (stats_by_cell_with_ci or {}).values()
+    )
+    methodology = {
+        "tool_version": __version__,
+        # Both at PATCH precision. They are one reproducibility record and a
+        # split grain makes it useless: scipy patch releases have changed
+        # statistical behaviour, and so have CPython's. `python_version` was
+        # major.minor while `scipy_version` was full, which recorded the
+        # dependency more precisely than the interpreter running it.
+        "scipy_version": _scipy.__version__,
+        "python_version": platform.python_version(),
+        "n_runs": runs,
+        "bootstrap": {
+            # ATTEMPTED, not succeeded. The bootstrap can be attempted and
+            # return nothing - a zero-variance cell, or a cell whose every run
+            # failed - and this field said `true` beside a payload holding no
+            # interval at all. `produced_intervals` is the outcome; keep them
+            # separate rather than flipping this one, which is what the seed
+            # and the method describe.
+            "enabled": should_compute_ci,
+            "produced_intervals": produced_intervals,
+            "method": ci_method if should_compute_ci else None,
+            "n_resamples": bootstrap_resamples if should_compute_ci else None,
+            "ci_level": ci_level if should_compute_ci else None,
+            "seed": bootstrap_seed if should_compute_ci else None,
+        },
+        "significance": {
+            "enabled": bool(significance_results),
+            "test": significance_test if significance_results else None,
+            "correction": correction if significance_results else None,
+            "threshold": significance_threshold if significance_results else None,
+        },
+    }
 
     if output_path is not None or output_fmt is not None:
         # File or explicit-format output path: serialize via batch's writers.
@@ -777,6 +945,7 @@ def compare(
             methodology=methodology,
             models_without_temperature=_models_without_temperature(model_list),
             significance_temperature_mixed=temperature_mixed,
+            run_identity=run_identity,
         )
     elif runs > 1:
         _display_results_with_runs(
@@ -799,6 +968,17 @@ def compare(
             hallucination_facts=(hallucination_config.facts if hallucination_config else None),
         )
 
+    # Checked AFTER the output is written and displayed: the user paid for the
+    # cells that completed, so the artifact is published rather than discarded.
+    # That is only safe because a cancelled cell is excluded from every
+    # statistic and from the assertions, and is NAMED wherever it is counted -
+    # the console status, the OK/R/F/C triple, `stats_by_cell` and the header
+    # totals - so the file reports what was measured. That claim was false when
+    # it was first written: four surfaces still read a cancelled cell as a
+    # success, and this comment is the reason to keep them honest.
+    if ledger.exhausted:
+        _print_error(_cost_ceiling_message(ledger))
+        sys.exit(EXIT_COST_CEILING)
     if any(s.error for s in states):
         sys.exit(EXIT_CALL_FAILED)
     sys.exit(EXIT_OK)
@@ -891,12 +1071,18 @@ def compare(
 )
 @click.option(
     "--max-cost",
-    type=click.FloatRange(min=0.0),
+    type=FiniteFloatRange(min=0.0),
     help="Refuse to run if the estimated cost exceeds this USD (excludes judge cost).",
 )
 @click.option(
     "--concurrency",
-    type=int,
+    # A minimum of 1, and deliberately no maximum. `asyncio.Semaphore(0)` is a
+    # valid semaphore that never admits anyone, so 0 hung forever with nothing
+    # printed; a negative value raised a bare ValueError that exited 1, the same
+    # code as a failed assertion. A ceiling would refuse a working
+    # configuration to prevent nothing: a Semaphore allocates no memory per
+    # slot, and a value above the task count is already a no-op.
+    type=click.IntRange(min=1),
     default=DEFAULT_CONCURRENCY,
     help=f"Max concurrent calls per provider (default: {DEFAULT_CONCURRENCY}).",
 )
@@ -984,6 +1170,9 @@ def batch(
     rate below --min-pass-rate, 2 = call failure or IO error. Call failures
     win over assertion failures (2 > 1).
     """
+    # RUN START, for the same reason as in `compare`: everything below this
+    # line can block, and the formatter runs after the last call returns.
+    started_at = utc_now_iso()
     # --strict-assertions and --min-pass-rate are alternatives; combining
     # them is ambiguous, so reject upfront.
     if strict_assertions and min_pass_rate is not None:
@@ -1047,6 +1236,19 @@ def batch(
         judge_criteria_list, judge_template_text = _resolve_judge_criteria_and_template(
             judge_criteria=judge_criteria,
             judge_template=judge_template,
+        )
+        # `prompts` hashes the suite's resolved prompt TEXT, not the file path:
+        # moving the file changes nothing about the experiment, and a path would
+        # leak a home directory into the key material.
+        run_identity = build_run_identity(
+            command="batch",
+            started_at=started_at,
+            prompts=[bp.prompt for bp in prompts],
+            models=model_list,
+            temperatures=temp_list,
+            system_prompts=list(command_sp_list),
+            judges=judge_models,
+            runs=1,
         )
         # The hallucination preset; None when not active. Overrides
         # judge criteria and template, and swaps in the hallucination
@@ -1115,11 +1317,34 @@ def batch(
             )
             sys.exit(EXIT_CALL_FAILED)
 
+    # One ledger for the whole run - the main gather and the judge gather share
+    # it, so judge spend counts toward the same ceiling.
+    ledger = CostLedger(max_cost)
+
     # Build states + run.
     def provider_factory(name: str) -> BaseProvider:
         return _get_provider_instance(name, local_url=local_url)
 
-    pairs = build_batch_states(prompts, model_list, temp_list, command_sp_list)
+    # `build_batch_states` resolves every model through `get_provider_for_model`,
+    # and it is the ONLY user input batch resolved outside a handler - so a typo
+    # in --models produced a raw traceback at exit 1 where `compare` printed a
+    # panel at exit 2. Exit 1 is EXIT_ASSERTION_FAILED, so a mistyped model
+    # reported the same code as a failing assertion.
+    #
+    # BOTH exceptions are caught. `RetiredModelError` is not a subclass of
+    # `UnknownModelError` - they are siblings under `ConfigurationError` - so
+    # catching only the one a typo raises would have left the three retired ids
+    # crashing.
+    #
+    # Wrapped here rather than hoisted into the resolution guard above: the
+    # size check and the cost ceiling sit between them, and building states
+    # first would allocate one StreamState per call for a batch those gates
+    # were about to refuse.
+    try:
+        pairs = build_batch_states(prompts, model_list, temp_list, command_sp_list)
+    except (UnknownModelError, RetiredModelError) as e:
+        _print_error(str(e))
+        sys.exit(EXIT_CALL_FAILED)
     console.print(
         f"[dim]Running batch: {total} call{'s' if total != 1 else ''} "
         f"({len(prompts)} prompt{'s' if len(prompts) != 1 else ''} x "
@@ -1145,6 +1370,7 @@ def batch(
             console=console,
             concurrency=concurrency,
             show_progress=True,
+            ledger=ledger,
         )
         if judge_models and not no_judge:
             jrs = await run_judging(
@@ -1158,6 +1384,7 @@ def batch(
                 ),
                 skip_self_eval=True,
                 concurrency=concurrency,
+                ledger=ledger,
             )
             if hallucination_config is not None:
                 annotate_risk_levels(jrs)
@@ -1167,6 +1394,9 @@ def batch(
     try:
         # Single asyncio.run keeps all httpx client cleanup on one event loop.
         judge_results = asyncio.run(_run_batch_and_judge())
+    except KeyboardInterrupt:
+        _print_error("Interrupted. Nothing was written; calls already made were billed.")
+        sys.exit(EXIT_INTERRUPTED)
     except KeyNotConfiguredError as e:
         _print_error(str(e))
         sys.exit(EXIT_CALL_FAILED)
@@ -1180,7 +1410,11 @@ def batch(
     # is vacuously fine.
     assertion_results_per_state: list[list[AssertionResult] | None] = []
     for state, bp in pairs:
-        if no_assertions or state.error:
+        # A cancelled cell joins the errored one here rather than being graded.
+        # It has `error is None` and `refused is False`, so it used to fall
+        # through to `run_assertions` and have its TRUNCATED text checked -
+        # `contains` on half an answer is not a verdict about the answer.
+        if no_assertions or state.error or state.status == "cancelled":
             assertion_results_per_state.append(None)
         elif state.refused and bp.assertions:
             # The call succeeded and was billed but produced no answer, so no
@@ -1217,7 +1451,15 @@ def batch(
         # explicitly rather than left to the default so the reason is on record
         # at the call site: the day batch gains --runs, this is what moves.
         significance_temperature_mixed=False,
+        run_identity=run_identity,
     )
+
+    # Ahead of every assertion gate: a pass rate over a truncated population is
+    # not a verdict about the suite. The output above has already been written,
+    # so the completed cells are kept.
+    if ledger.exhausted:
+        _print_error(_cost_ceiling_message(ledger))
+        sys.exit(EXIT_COST_CEILING)
 
     failed = sum(1 for r in results if r.error)
     refused = sum(1 for r in results if r.error is None and r.refused)
@@ -1253,11 +1495,20 @@ def batch(
     # about assertions on exactly the run where it mattered most.
     if totals.configured:
         if totals.pass_rate is not None:
-            rate_color = "green" if totals.failed == 0 else "red"
-            summary_parts.append(
-                f"[{rate_color}]assertions {totals.passed}/{totals.definitive} "
-                f"({totals.pass_rate * 100:.0f}%)[/{rate_color}]"
+            # A refusal is never a `failed`, so the colour rule alone painted a
+            # 100% green beside a model that declined every request. The ratio
+            # is unchanged - it describes the requests that were answered - but
+            # it is no longer allowed to read as a clean pass on its own.
+            rate_color = (
+                "green" if totals.failed == 0 and not totals.refused else "red"
             )
+            summary = (
+                f"assertions {totals.passed}/{totals.definitive} "
+                f"({totals.pass_rate * 100:.0f}%)"
+            )
+            if totals.refused:
+                summary += f" + {totals.refused} refused"
+            summary_parts.append(f"[{rate_color}]{summary}[/{rate_color}]")
         else:
             summary_parts.append(
                 f"[red]assertions {ERROR_MARK} 0/{totals.errored} errored[/red]"
@@ -1291,7 +1542,30 @@ def batch(
                     "--strict-assertions."
                 )
                 sys.exit(EXIT_ASSERTION_FAILED)
-        elif min_pass_rate is not None:
+        if totals.refused:
+            # A refusal removed its own assertions from BOTH halves of the
+            # ratio, so the rate above covers only what was answered. With one
+            # definitive assertion anywhere in the batch the `rate is None`
+            # branch never runs, and every gate flag - `--min-pass-rate 1.0`
+            # included - passed a run where a model declined everything.
+            #
+            # This is checked ahead of the ratio rather than folded into it:
+            # the ratio is a real measurement of the answered requests and
+            # stays that. What was missing was a gate on what it does not
+            # cover.
+            #
+            # `_print_error` now escapes as well as redacts, so interpolating
+            # an assertion value or an `error` string here would be shown as
+            # text rather than parsed. The message stays literal anyway: the
+            # counts are what a gate reader needs, and naming one failing
+            # assertion out of many would read as though it were the only one.
+            _print_error(
+                f"{totals.refused} configured assertion(s) were not evaluated "
+                "because the model refused. The pass rate above covers only "
+                "the requests that were answered."
+            )
+            sys.exit(EXIT_ASSERTION_FAILED)
+        if min_pass_rate is not None:
             # --min-pass-rate threshold mode: tolerate some failures.
             if rate < min_pass_rate:
                 sys.exit(EXIT_ASSERTION_FAILED)
@@ -1422,6 +1696,7 @@ async def _run_mode_only_judging(
     template: str,
     provider_factory: Callable[[str], BaseProvider],
     concurrency: int,
+    ledger: CostLedger | None = None,
 ) -> list[JudgeResult]:
     """Judge only the mode output per cell, then expand the verdict to every run.
 
@@ -1469,6 +1744,7 @@ async def _run_mode_only_judging(
         response_parser=None,
         skip_self_eval=True,
         concurrency=concurrency,
+        ledger=ledger,
     )
 
     verdict_by_cell: dict[tuple[str, float, str | None], JudgeResult] = {
@@ -1538,15 +1814,25 @@ def _states_to_compare_results(
 def _flatten_cell_cis(
     cis: dict,
 ) -> dict:
-    """Convert {model: {metric: ConfidenceInterval}} to a flat dict keyed by
-    model for formatter consumption.
+    """Convert {cell: {metric: ConfidenceInterval}} to a flat dict for
+    formatter consumption, keyed by the same cell tuple.
 
-    Output shape (per model):
-      {model_name: {
+    The key passes through untouched - `(model, temperature, system)` - so the
+    formatters can look a cell's own interval up by the key they already build.
+
+    Output shape (per cell):
+      {(model, temperature, system): {
         "latency_ms": {"ci_low": .., "ci_high": .., "ci_level": ..,
-                      "method": .., "n_resamples": .., "seed": ..},
+                      "method": .., "n_resamples": .., "seed": ..,
+                      "point_estimate": .., "n_samples": ..},
         ...
       }}
+
+    `point_estimate` and `n_samples` are computed by the bootstrap and were
+    dropped here, which left every consumer with two bounds and no centre: the
+    Markdown "Point estimate" column had nothing to print and hard-coded a
+    dash, and nothing on any surface said how many observations an interval
+    rests on.
     """
     out: dict = {}
     for model, metrics in cis.items():
@@ -1561,6 +1847,8 @@ def _flatten_cell_cis(
                 "method": ci.method,
                 "n_resamples": ci.n_resamples,
                 "seed": ci.seed,
+                "point_estimate": ci.point_estimate,
+                "n_samples": ci.n_samples,
             }
     return out
 
@@ -1600,6 +1888,7 @@ def _emit_batch_results(
     methodology: dict | None = None,
     models_without_temperature: list[str] | None = None,
     significance_temperature_mixed: bool = False,
+    run_identity: dict | None = None,
 ) -> None:
     """Dispatch to the right writer/renderer based on resolved format.
 
@@ -1624,6 +1913,7 @@ def _emit_batch_results(
                 methodology=methodology,
                 models_without_temperature=models_without_temperature,
                 significance_temperature_mixed=significance_temperature_mixed,
+                run_identity=run_identity,
             )
         elif output_fmt == "csv":
             from cli_modelarium.output_formatters import _format_csv
@@ -1648,6 +1938,7 @@ def _emit_batch_results(
                     methodology=methodology,
                     models_without_temperature=models_without_temperature,
                     significance_temperature_mixed=significance_temperature_mixed,
+                    run_identity=run_identity,
                 )
             )
         else:
@@ -1673,6 +1964,7 @@ def _emit_batch_results(
             methodology=methodology,
             models_without_temperature=models_without_temperature,
             significance_temperature_mixed=significance_temperature_mixed,
+            run_identity=run_identity,
         )
     elif output_fmt == "markdown":
         write_markdown(
@@ -1685,11 +1977,244 @@ def _emit_batch_results(
             methodology=methodology,
             models_without_temperature=models_without_temperature,
             significance_temperature_mixed=significance_temperature_mixed,
+            run_identity=run_identity,
         )
     else:
         _print_error(f"Unsupported output format: {output_fmt!r}")
         sys.exit(EXIT_CALL_FAILED)
-    console.print(f"[dim]Wrote {output_path}[/dim]")
+    console.print(f"[dim]Wrote {escape(str(output_path))}[/dim]")
+
+
+# ===== diff =====
+
+
+def _fmt_value(name: str, value: object) -> str:
+    """One number, in the unit a reader expects. `-` when it is null.
+
+    A dash rather than `0`: a cancelled cell's cost is unknown, and rendering
+    the unknown and the measured zero identically is the inference-by-absence
+    this release spent three commits removing from the payload.
+
+    NAMED, and no longer `_fmt_metric`, because it now has three callers. The
+    run-totals line used to interpolate its values raw and printed
+    `total_cost_usd: 0.00059625 -> 0.0006187499999999999` two lines under a
+    table that formatted the same quantity to six places - a float artefact
+    that reads as an arithmetic bug in a tool whose subject is cost. The
+    p-value line had the same shape. One formatter, so the surfaces cannot
+    drift apart again.
+    """
+    if value is None:
+        return "[dim]-[/dim]"
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return str(value)
+    if name == "cost_usd" or name.endswith("_cost_usd"):
+        return f"${value:.6f}"
+    if name.endswith("_ms"):
+        return f"{value:.1f}"
+    if isinstance(value, float):
+        # `pass_rate`, a p-value, anything else fractional. `:g` drops the
+        # binary-float tail without inventing precision the value never had.
+        return f"{value:g}"
+    return f"{value:,}"
+
+
+def _fmt_delta(metric: MetricDelta) -> str:
+    """The change, signed, with a percent when there is a baseline to take it against.
+
+    No colour and no threshold. Cost moving up is not "bad" - a slower, dearer
+    model may be the one that got the answer right - and thinking-token
+    variance alone moves cost between byte-identical outputs, at the magnitude
+    measured in `diffing._output_changed`, so any fixed band would fire on
+    that and nothing else.
+    """
+    if metric.delta is None:
+        return "[dim]-[/dim]"
+    if metric.delta == 0:
+        return "[dim]0[/dim]"
+    body = _fmt_value(metric.name, abs(metric.delta))
+    sign = "+" if metric.delta > 0 else "-"
+    if metric.pct is None:
+        return f"{sign}{body}"
+    return f"{sign}{body} ({metric.pct:+.1f}%)"
+
+
+def _fmt_output_change(changed: bool | None) -> str:
+    """Whether the answer text changed, as words rather than a number.
+
+    Text equality is a boolean and does not belong in a column of signed
+    percentages, so it renders in the Change column with the before/after
+    cells left empty - there is no number to put in them, and a `0` there
+    would read as a measurement.
+
+    Three phrasings for three states, because two of them are opposite
+    findings that used to render identically: a model returning the SAME
+    answer at a different thinking cost, and a model returning a DIFFERENT
+    answer. `None` is neither - it means a side did not answer at all.
+    """
+    if changed is None:
+        return "[dim]no answer on one side[/dim]"
+    if changed:
+        return "[bold]text changed[/bold]"
+    return "[dim]text unchanged[/dim]"
+
+
+def _render_diff(result: DiffResult, before_name: str, after_name: str, show_all: bool) -> None:
+    """Print the human view: what moved, and everything that qualifies it.
+
+    Every qualifier prints BEFORE the numbers. A pricing-table mismatch read
+    after a cost table has already been believed is a footnote; read before it,
+    it is the reason the table means less than it looks.
+    """
+    for note in result.verdict.notes:
+        console.print(f"[dim]Note: {escape(note)}[/dim]")
+    for warning in result.verdict.warnings:
+        console.print(
+            Panel(escape(warning), title="Qualified", border_style="yellow")
+        )
+
+    # DISPLAY is `notable`, the exit code is `moved`. The two differ by the
+    # cells nothing can be said about - a side that did not answer, a metric
+    # null on one side. Those are not changes and must not flip the exit code,
+    # and they are also not "unchanged", so hiding them would make "we cannot
+    # tell" and "nothing happened" render the same way.
+    shown = result.cells if show_all else [c for c in result.cells if c.notable]
+
+    if shown:
+        # One row per (cell, metric). The alternative - a column per metric
+        # holding "before -> after (delta)" - puts three numbers in one cell and
+        # wraps to four lines at any realistic terminal width, which is how a
+        # table stops being read. The cell name prints once per group.
+        table = Table(title=f"{before_name} \u2192 {after_name}", border_style="dim")
+        table.add_column("Cell", style="bold")
+        table.add_column("Metric")
+        table.add_column(before_name, justify="right")
+        table.add_column(after_name, justify="right")
+        table.add_column("Change", justify="right")
+        for cell in shown:
+            by_name = {m.name: m for m in cell.metrics}
+            # `output` FIRST, and on every shown cell. It is the fact that
+            # makes the numbers under it readable: "cost moved and the answer
+            # did not" is the ordinary case for a thinking model, and a reader
+            # who meets the cost delta first has already drawn a conclusion.
+            table.add_row(
+                escape(cell.key.label()),
+                "output",
+                "",
+                "",
+                _fmt_output_change(cell.output_changed),
+            )
+            for metric in (
+                by_name[n]
+                for n in CONSOLE_METRICS
+                if show_all or by_name[n].moved or by_name[n].uncomparable
+            ):
+                table.add_row(
+                    "",
+                    metric.name,
+                    _fmt_value(metric.name, metric.before),
+                    _fmt_value(metric.name, metric.after),
+                    _fmt_delta(metric),
+                )
+        console.print(table)
+
+    unchanged = len(result.cells) - len(shown)
+    if unchanged and not show_all:
+        console.print(
+            f"[dim]{unchanged} cell{'s' if unchanged != 1 else ''} unchanged "
+            f"(--all to show).[/dim]"
+        )
+    if not result.cells:
+        console.print("[dim]No cells in common.[/dim]")
+
+    # Dropped and added cells get their own lines rather than a dash in the
+    # delta column: a cell that ran on one side only has no delta, and a dash
+    # in a numeric column invites reading it as zero.
+    for label, keys in (
+        (f"Only in {before_name}", result.only_in_before),
+        (f"Only in {after_name}", result.only_in_after),
+    ):
+        if keys:
+            console.print(f"\n[bold]{escape(label)}[/bold]")
+            for key in keys:
+                console.print(f"  {escape(key.label())}")
+
+    if result.totals:
+        console.print("\n[bold]Run totals[/bold]")
+        for name, before_value, after_value in result.totals:
+            console.print(
+                f"  {name}: {_fmt_value(name, before_value)} \u2192 "
+                f"{_fmt_value(name, after_value)}"
+            )
+
+    if result.p_values:
+        # Side by side, never subtracted - see `DiffResult.p_values` in
+        # diffing.py for why differencing them invents a quantity.
+        console.print("\n[bold]Significance verdicts[/bold] [dim](reported, not compared)[/dim]")
+        for entry in result.p_values:
+            pair = f"{entry['model_a']} vs {entry['model_b']}"
+            console.print(
+                f"  [dim]{entry['side']}[/dim] {escape(str(pair))} "
+                f"[dim]{entry['kind']}[/dim] "
+                f"p={_fmt_value('p_value', entry['p_value'])}"
+            )
+
+
+@main.command("diff")
+@click.argument("before", required=True)
+@click.argument("after", required=True)
+@click.option(
+    "--output-format",
+    type=click.Choice(["console", "json"], case_sensitive=False),
+    default="console",
+    help="console (default) shows what moved; json carries every cell and qualifier.",
+)
+@click.option("--all", "show_all", is_flag=True, help="Show unchanged cells too.")
+def diff_cmd(before: str, after: str, output_format: str, show_all: bool) -> None:
+    """Compare two JSON payloads and report what moved.
+
+    BEFORE and AFTER are JSON files from `compare` or `batch` - written with
+    `--output results.json` or `--output-format json`. Argument order sets the
+    direction: BEFORE is read as the earlier run, whatever the timestamps say.
+
+    Exits 0 when nothing moved, 4 when something did, and 2 when the two
+    payloads cannot be compared.
+    """
+    paths = []
+    for label, raw in (("BEFORE", before), ("AFTER", after)):
+        try:
+            paths.append(safe_input_path(raw, max_size_bytes=MAX_PAYLOAD_BYTES))
+        except (FileNotFoundError, ValueError) as exc:
+            _print_error(f"{label}: {exc}")
+            sys.exit(EXIT_CALL_FAILED)
+
+    payloads = []
+    for path in paths:
+        try:
+            payloads.append(load_payload(path))
+        except PayloadError as exc:
+            _print_error(str(exc))
+            sys.exit(EXIT_CALL_FAILED)
+
+    before_name, after_name = paths[0].name, paths[1].name
+    result = diff_payloads(payloads[0], payloads[1], before_name, after_name)
+
+    if not result.verdict.ok:
+        _print_error(
+            "These payloads are not comparable:\n  "
+            + "\n  ".join(result.verdict.refusals)
+        )
+        sys.exit(EXIT_CALL_FAILED)
+
+    if output_format.lower() == "json":
+        _write_machine_payload(to_json(result, before_name, after_name))
+    else:
+        ordering = ordering_warning(payloads[0], payloads[1], before_name, after_name)
+        if ordering:
+            console.print(f"[yellow]{escape(ordering)}[/yellow]")
+        _render_diff(result, before_name, after_name, show_all)
+
+    sys.exit(EXIT_DIFF_CHANGED if result.moved else EXIT_OK)
+
 
 
 # ===== configure =====
@@ -1915,7 +2440,7 @@ def keys_list() -> None:
 
     saved_local = load_local_url()
     if saved_local:
-        table.add_row("local", f"[green]{saved_local}[/green]")
+        table.add_row("local", f"[green]{escape(saved_local)}[/green]")
     else:
         table.add_row("local", f"[dim]default ({LocalProvider.DEFAULT_URL})[/dim]")
 
@@ -1944,7 +2469,7 @@ def keys_set(provider: str, base_url: str | None) -> None:
             _print_error(str(e))
             sys.exit(EXIT_CALL_FAILED)
         save_local_url(base_url)
-        console.print(f"[green]Saved local provider URL: {base_url}[/green]")
+        console.print(f"[green]Saved local provider URL: {escape(base_url)}[/green]")
         return
 
     if provider not in KEY_PATTERNS:
@@ -2073,7 +2598,7 @@ def _list_local_models(local_url: str | None) -> None:
     except httpx.ConnectError:
         console.print(
             Panel(
-                f"Could not reach local server at {url}.\n\n"
+                f"Could not reach local server at {escape(url)}.\n\n"
                 f"Possible causes:\n"
                 f"  - Server not running (try: ollama serve)\n"
                 f"  - Wrong URL (use --local-url to override)\n"
@@ -2086,7 +2611,7 @@ def _list_local_models(local_url: str | None) -> None:
     except httpx.TimeoutException:
         console.print(
             Panel(
-                f"Timed out connecting to {url} "
+                f"Timed out connecting to {escape(url)} "
                 f"(waited {LocalProvider.DISCOVERY_TIMEOUT_SECONDS:.0f}s).\n"
                 f"The server may be starting up or under heavy load.",
                 title="Local models",
@@ -2097,7 +2622,7 @@ def _list_local_models(local_url: str | None) -> None:
     except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as e:
         console.print(
             Panel(
-                f"Local server at {url} returned an unexpected response:\n"
+                f"Local server at {escape(url)} returned an unexpected response:\n"
                 f"  {redact_secrets(str(e))}",
                 title="Local models",
                 border_style="yellow",
@@ -2108,7 +2633,7 @@ def _list_local_models(local_url: str | None) -> None:
     if not models:
         console.print(
             Panel(
-                f"Local server at {url} responded but has no models installed.\n"
+                f"Local server at {escape(url)} responded but has no models installed.\n"
                 f"For Ollama: ollama pull llama3.3",
                 title="Local models",
                 border_style="cyan",
@@ -2117,7 +2642,9 @@ def _list_local_models(local_url: str | None) -> None:
         return
 
     table = Table(
-        title=f"local [dim]({url})[/dim]",
+        # Only the url is escaped: the `[dim]` is the tool's own styling and
+        # must still be applied rather than printed.
+        title=f"local [dim]({escape(url)})[/dim]",
         border_style="dim",
         title_justify="left",
     )
@@ -2131,11 +2658,17 @@ def _list_local_models(local_url: str | None) -> None:
         created = entry.get("created")
         created_text = _format_unix_timestamp(created) if created else "-"
         owned_by = str(entry.get("owned_by", "-"))
-        table.add_row(f"local/{model_id}", created_text, owned_by, "[dim]Free[/dim]")
+        table.add_row(
+            f"local/{escape(model_id)}", created_text, escape(owned_by),
+            "[dim]Free[/dim]",
+        )
 
     console.print(table)
     first_id = models[0].get("id", "<name>")
-    console.print(f"\n[dim]Use these via: cli-modelarium 'prompt' --models local/{first_id}[/dim]")
+    console.print(
+        f"\n[dim]Use these via: cli-modelarium 'prompt' "
+        f"--models local/{escape(first_id)}[/dim]"
+    )
 
 
 def _format_unix_timestamp(ts: object) -> str:
@@ -2192,7 +2725,7 @@ def pricing_cmd(model: str | None, show_all: bool) -> None:
         return
 
     if is_local_model(model):
-        console.print(f"[bold]{model}[/bold]: [dim]Free (local model)[/dim]")
+        console.print(f"[bold]{escape(model)}[/bold]: [dim]Free (local model)[/dim]")
         return
 
     # This path reads PRICING directly and bypasses get_provider_for_model(),
@@ -2210,7 +2743,8 @@ def pricing_cmd(model: str | None, show_all: bool) -> None:
         sys.exit(EXIT_CALL_FAILED)
 
     cached = entry.get("cached_input")
-    console.print(f"[bold]{model}[/bold] ([dim]{entry['provider']}[/dim])")
+    # `provider` is a PRICING literal, so only the id needs escaping.
+    console.print(f"[bold]{escape(model)}[/bold] ([dim]{entry['provider']}[/dim])")
     console.print(f"  Input:   ${float(entry['input']):.4f} / 1M tokens")
     console.print(f"  Output:  ${float(entry['output']):.4f} / 1M tokens")
     if cached is not None:
@@ -2226,9 +2760,10 @@ def _sweep_caveat(affected: list[str], temperature_count: int) -> str:
     verb, pronoun = ("does not", "it") if len(affected) == 1 else ("do not", "them")
     return (
         f"{', '.join(affected)} {verb} accept a temperature setting, so the "
-        f"field is omitted for {pronoun}. All {temperature_count} runs of each "
-        f"will be identical rather than a sweep, and the temperature shown in "
-        f"the results reflects what was requested, not what was applied."
+        f"field is omitted for {pronoun}. The {temperature_count} runs of each "
+        f"are not a sweep - the same request is sent each time, and the "
+        f"temperature shown in the results reflects what was requested, not "
+        f"what was applied."
     )
 
 
@@ -2404,9 +2939,19 @@ def _parse_temperatures(raw: str) -> list[float]:
         if not token:
             continue
         try:
-            out.append(float(token))
+            parsed = float(token)
         except ValueError:
             raise ValueError(f"Invalid temperature value: {token!r}") from None
+        # `float()` happily returns nan/inf, and a non-finite temperature was
+        # written straight into the JSON payload as `NaN` - which RFC 8259 has
+        # no syntax for. No BOUND is enforced: there is no client-side limit
+        # anywhere and every provider forwards the raw value, so refusing 2.0
+        # would reject a temperature that works today.
+        if not math.isfinite(parsed):
+            raise ValueError(
+                f"Temperature must be a finite number, got {token!r}."
+            ) from None
+        out.append(parsed)
     return out or [0.0]
 
 
@@ -2454,7 +2999,7 @@ def _resolve_all_local(local_url: str | None) -> list[str]:
     ):
         console.print(
             Panel(
-                f"Could not reach a local server at {url}.\n"
+                f"Could not reach a local server at {escape(url)}.\n"
                 f"Is Ollama / LM Studio / vLLM / llama.cpp running? "
                 f"Override the URL with --local-url.",
                 title="all-local",
@@ -2699,8 +3244,20 @@ def _display_results(
 
     total_cost = 0.0
     for i, s in enumerate(states):
+        word = status_word(s.error, s.refused, s.status == "cancelled")
         if s.error:
             status = "[red]error[/red]"
+            cost_text = "[dim]-[/dim]"
+            ttft_text = "[dim]-[/dim]"
+            latency_text = "[dim]-[/dim]"
+            in_text = "[dim]-[/dim]"
+            out_text = "[dim]-[/dim]"
+        elif word == STATUS_CANCELLED:
+            # Never dispatched, so there is no timing and no cost to show. It
+            # printed `ok` at `$0.000000` until this branch existed - a cell
+            # that never ran, rendered as a free success, on the DEFAULT
+            # surface. Its cost is not summed: nothing was spent.
+            status = "[cyan]cancelled[/cyan]"
             cost_text = "[dim]-[/dim]"
             ttft_text = "[dim]-[/dim]"
             latency_text = "[dim]-[/dim]"
@@ -2719,7 +3276,7 @@ def _display_results(
             in_text = str(s.input_tokens)
             out_text = str(s.output_tokens)
 
-        row: list[str] = [s.model]
+        row: list[str] = [escape(s.model)]
         if show_sp_column:
             if s.system_prompt and s.system_prompt in prompt_indices:
                 row.append(f"SP {prompt_indices[s.system_prompt]}")
@@ -2752,28 +3309,31 @@ def _display_results(
     # Per-model output blocks. When multiple SPs are in play, identify which
     # one produced each block so the reader can cross-reference the legend.
     for i, s in enumerate(states):
-        header = f"[bold cyan]>[/bold cyan] [bold]{s.model}[/bold] @ {s.temperature:.1f}"
+        header = (
+            f"[bold cyan]>[/bold cyan] [bold]{escape(s.model)}[/bold] "
+            f"@ {s.temperature:.1f}"
+        )
         if show_sp_column and s.system_prompt and s.system_prompt in prompt_indices:
             header += f"  [magenta]SP {prompt_indices[s.system_prompt]}[/magenta]"
         console.print(header)
         if s.error:
-            console.print(f"  [red]{s.error}[/red]")
+            console.print(f"  [red]{escape(s.error)}[/red]")
         else:
             for line in s.text.splitlines() or [""]:
-                console.print(f"  {line}")
+                console.print(f"  {escape(line)}")
         # Optional judge reasoning lines.
         if include_reasoning and judge_results is not None:
             for j in judge_results[i].judges:
                 score_str = j.score if j.score is not None else "?"
                 if j.parse_error:
                     console.print(
-                        f"  [magenta dim]judge {j.model}: parse error - "
-                        f"{j.parse_error}[/magenta dim]"
+                        f"  [magenta dim]judge {escape(j.model)}: parse error - "
+                        f"{escape(str(j.parse_error))}[/magenta dim]"
                     )
                 else:
                     console.print(
-                        f"  [magenta dim]judge {j.model} ({score_str}/10): "
-                        f"{j.reasoning}[/magenta dim]"
+                        f"  [magenta dim]judge {escape(j.model)} ({score_str}/10): "
+                        f"{escape(str(j.reasoning))}[/magenta dim]"
                     )
         console.print()
 
@@ -2829,6 +3389,11 @@ def _display_results_with_runs(
 
     distinct_sps = {s.system_prompt for s in states if s.system_prompt}
     show_sp_column = len(distinct_sps) > 1
+    # Only when it happened, on the same rule as the SP column: a run with no
+    # cancelled cells keeps the three-slot header byte-identical. Without the
+    # fourth slot the triple silently failed to add up to the run count printed
+    # in this table's own title - "2/0/0" under "3 runs each".
+    show_cancelled = any(s.status == "cancelled" for s in states)
     show_hallucination_rate = hallucination_mode and judge_results is not None
     show_judge_column = judge_results is not None and not show_hallucination_rate
 
@@ -2839,7 +3404,13 @@ def _display_results_with_runs(
     if show_sp_column:
         table.add_column("SP", style="magenta", justify="right")
     table.add_column("Temp", justify="right")
-    table.add_column("OK/Fail", justify="right")
+    # `OK/R/F`, not `OK/Ref/Fail`: the long form renders as "OK/Re…" at
+    # both 80 and 100 columns, which hides that the cell carries a third
+    # number. The compact form shows three slots at every width, and "R"
+    # has no competitor here - retries are a CSV/JSON field and appear on
+    # neither console table. Markdown uses the full words; a pipe table is
+    # not width-bound.
+    table.add_column("OK/R/F/C" if show_cancelled else "OK/R/F", justify="right")
     table.add_column("Latency mean ± stdev", justify="right", style="dim")
     table.add_column("CV", justify="right", style="dim")
     table.add_column("Tokens mean", justify="right")
@@ -2870,11 +3441,32 @@ def _display_results_with_runs(
             high_count = 0
             judged = 0
             for s in cell_states:
+                if s.error is not None or s.refused:
+                    # A refusal is neither a hallucination pass nor a fail: there
+                    # is no answer to classify, so it belongs in neither half of
+                    # this fraction. Same guard as compute_mcnemar_pairwise, so
+                    # the cell and the test below it count the same population.
+                    #
+                    # The `s.error` clause is redundant today - run_judging
+                    # returns an empty JudgeResult() for an errored state, which
+                    # `not jr.judges` below already drops - and the `s.refused`
+                    # clause becomes redundant too once run_judging stops judging
+                    # declined rows. Both are stated anyway so the rule lives
+                    # here rather than in a fact about another module.
+                    continue
                 jr = judge_by_state_id.get(id(s))
                 if jr is None or not jr.judges:
                     continue
+                risk = jr.aggregated_risk_level
+                if risk is None:
+                    # The judge answered but named no risk level, so this run was
+                    # not classified. Counting it as "judged" made the cell say
+                    # 1/3 where compute_mcnemar_pairwise, which drops it, used
+                    # 1/1 on the same data. The two now drop the same three
+                    # kinds of run: errored or declined, unjudged, unclassified.
+                    continue
                 judged += 1
-                if jr.aggregated_risk_level == "High":
+                if risk == "High":
                     high_count += 1
             if judged > 0:
                 rate = high_count / judged
@@ -2913,15 +3505,19 @@ def _display_results_with_runs(
         )
         diversity_text = f"{stats.output_diversity:.2f}"
 
-        if stats.mode_output is None:
+        if stats.n_succeeded == 0:
+            # "all unique" is false when nothing was produced. A cell whose
+            # runs were all refused or all failed answered nothing at all.
+            mode_text = "[dim]no output[/dim]"
+        elif stats.mode_output is None:
             mode_text = "[dim]no mode (all unique)[/dim]"
         else:
             preview = stats.mode_output.replace("\n", " ").strip()
             if len(preview) > 50:
                 preview = preview[:47] + "..."
-            mode_text = f'"{preview}" ({stats.mode_count}x)'
+            mode_text = f'"{escape(preview)}" ({stats.mode_count}x)'
 
-        row = [model]
+        row = [escape(model)]
         if show_sp_column:
             if sp and sp in prompt_indices:
                 row.append(f"SP {prompt_indices[sp]}")
@@ -2930,7 +3526,12 @@ def _display_results_with_runs(
         row.extend(
             [
                 f"{temp:.1f}",
-                f"{stats.n_succeeded}/{stats.n_failed}",
+                (
+                    f"{stats.n_succeeded}/{stats.n_refused}/{stats.n_failed}"
+                    f"/{stats.n_cancelled}"
+                    if show_cancelled
+                    else f"{stats.n_succeeded}/{stats.n_refused}/{stats.n_failed}"
+                ),
                 latency_cell,
                 cv_text,
                 tokens_text,
@@ -2957,19 +3558,21 @@ def _display_results_with_runs(
     # Per-cell expanded view: list every run's output beneath its cell header.
     for key, cell_states, _stats in cell_stats:
         model, temp, sp = key
-        header = f"[bold cyan]>[/bold cyan] [bold]{model}[/bold] @ {temp:.1f}"
+        header = (
+            f"[bold cyan]>[/bold cyan] [bold]{escape(model)}[/bold] @ {temp:.1f}"
+        )
         if show_sp_column and sp and sp in prompt_indices:
             header += f"  [magenta]SP {prompt_indices[sp]}[/magenta]"
         console.print(header)
         for s in cell_states:
             tag = f"  [dim]run {s.run_index + 1}/{runs}:[/dim]"
             if s.error:
-                console.print(f"{tag} [red]{s.error}[/red]")
+                console.print(f"{tag} [red]{escape(s.error)}[/red]")
             else:
                 lines = s.text.splitlines() or [""]
-                console.print(f"{tag} {lines[0]}")
+                console.print(f"{tag} {escape(lines[0])}")
                 for line in lines[1:]:
-                    console.print(f"          {line}")
+                    console.print(f"          {escape(line)}")
         if include_reasoning and judge_results is not None:
             for s in cell_states:
                 jr = judge_by_state_id.get(id(s))
@@ -2979,13 +3582,13 @@ def _display_results_with_runs(
                     score_str = j.score if j.score is not None else "?"
                     if j.parse_error:
                         console.print(
-                            f"  [magenta dim]judge {j.model}: parse error - "
-                            f"{j.parse_error}[/magenta dim]"
+                            f"  [magenta dim]judge {escape(j.model)}: parse error - "
+                            f"{escape(str(j.parse_error))}[/magenta dim]"
                         )
                     else:
                         console.print(
-                            f"  [magenta dim]judge {j.model} ({score_str}/10): "
-                            f"{j.reasoning}[/magenta dim]"
+                            f"  [magenta dim]judge {escape(j.model)} ({score_str}/10): "
+                            f"{escape(str(j.reasoning))}[/magenta dim]"
                         )
                 # Mode-only judging: one verdict per cell, no need to repeat.
                 if runs > 1 and not hallucination_mode:
@@ -3022,35 +3625,58 @@ def _display_results_with_runs(
 
 
 def _display_confidence_intervals(stats_by_cell_cis: dict) -> None:
-    """Render bootstrap CIs on per-model means below the runs table."""
+    """Render bootstrap CIs on per-cell means below the runs table.
+
+    One line per cell, labelled the way the runs table above labels its rows -
+    model, temperature, and `SP N` when more than one system prompt is in play.
+    A bare model name identified nothing once the same model appeared in
+    several cells.
+    """
     if not stats_by_cell_cis:
         return
     has_any = any(metrics for metrics in stats_by_cell_cis.values())
     if not has_any:
         return
 
+    prompt_indices = ci_prompt_indices(stats_by_cell_cis.keys())
     console.print()
     console.print("[bold]Bootstrap Confidence Intervals[/bold]")
-    for model, metrics in stats_by_cell_cis.items():
+    for key, metrics in stats_by_cell_cis.items():
         if not metrics:
             continue
         parts: list[str] = []
-        for metric_name in ("latency_ms", "score", "output_tokens", "cost_usd"):
+        for metric_name in CI_METRIC_ORDER:
             ci = metrics.get(metric_name)
             if ci is None:
                 continue
-            label = {
-                "latency_ms": "latency",
-                "score": "score",
-                "output_tokens": "tokens",
-                "cost_usd": "cost",
-            }[metric_name]
+            label = CI_CONSOLE_LABELS[metric_name]
             level_pct = int(round(ci["ci_level"] * 100))
-            parts.append(
-                f"{label} [{level_pct}% CI: {ci['ci_low']:.3f}, {ci['ci_high']:.3f}]"
-            )
+            low = format_ci_value(metric_name, ci["ci_low"])
+            high = format_ci_value(metric_name, ci["ci_high"])
+            parts.append(f"{label} [{level_pct}% CI: {low}, {high}]")
         if parts:
-            console.print(f"  {model}: " + " | ".join(parts))
+            console.print(f"  {escape(ci_cell_label(key, prompt_indices))}: " + " | ".join(parts))
+
+
+def _mcnemar_caveat_markup(affected: list[tuple[str, int]]) -> str:
+    """The McNemar decline caveat, wrapped for Rich with the model ids escaped.
+
+    A model id is user-supplied - OpenRouter and `local/` ids are freeform - and
+    this console site parses markup. An id carrying a stray closing tag raises
+    MarkupError rather than merely rendering oddly.
+    """
+    return f"[yellow]{escape(mcnemar_pairing_caveat(affected))}[/yellow]"
+
+
+def _significance_caveat_markup(affected: list[tuple[str, int]]) -> str:
+    """The significance decline caveat, wrapped for Rich with the ids escaped.
+
+    The twin of `_mcnemar_caveat_markup` above, and it exists for the same
+    reason: the caveat names model ids, a model id is user-supplied, and this
+    console site parses markup. The two caveats say different things - see
+    `mcnemar_pairing_caveat` - but they are equally unsafe to print raw.
+    """
+    return f"[yellow]{escape(significance_refusal_caveat(affected))}[/yellow]"
 
 
 def _display_mcnemar(mcnemar_results: list) -> None:
@@ -3065,13 +3691,30 @@ def _display_mcnemar(mcnemar_results: list) -> None:
         f"[dim]Metric: hallucination pass/fail | Correction: "
         f"{first.correction_method} | Threshold: p < {first.threshold}[/dim]"
     )
+    n_untestable = getattr(first, "n_pairs_untestable", 0)
+    if n_untestable:
+        console.print(
+            f"[yellow]{untestable_pairs_notice(n_untestable, len(mcnemar_results))}"
+            f"[/yellow]"
+        )
+    affected = refused_arms(mcnemar_results)
+    if affected:
+        # Not the significance caveat: this test drops declines rather than
+        # consuming them, so the two say different things.
+        console.print(_mcnemar_caveat_markup(affected))
 
     for r in mcnemar_results:
+        if getattr(r, "n_paired", 0) == 0:
+            console.print(
+                f"  {escape(r.model_a)} vs {escape(r.model_b)}: "
+                f"no runs in common (nothing to compare)"
+            )
+            continue
         if r.n_discordant == 0:
             console.print(
-                f"  {r.model_a} ({r.a_pass_rate:.0%} pass) vs "
-                f"{r.model_b} ({r.b_pass_rate:.0%} pass): "
-                f"no discordant runs (test undefined)"
+                f"  {escape(r.model_a)} ({r.a_pass_rate:.0%} pass) vs "
+                f"{escape(r.model_b)} ({r.b_pass_rate:.0%} pass): "
+                f"no discordant runs of {r.n_paired} paired (test undefined)"
             )
             continue
         sig_marker = "*" if r.significant_at_threshold else ""
@@ -3083,10 +3726,10 @@ def _display_mcnemar(mcnemar_results: list) -> None:
             "edwards_chi2": "Edwards",
         }.get(r.method, r.method)
         console.print(
-            f"  {r.model_a} ({r.a_pass_rate:.0%} pass) vs "
-            f"{r.model_b} ({r.b_pass_rate:.0%} pass): "
+            f"  {escape(r.model_a)} ({r.a_pass_rate:.0%} pass) vs "
+            f"{escape(r.model_b)} ({r.b_pass_rate:.0%} pass): "
             f"p={p_display:.4f}{sig_marker} "
-            f"({method_label}, discordant={r.n_discordant})"
+            f"({method_label}, {r.n_paired} paired, discordant={r.n_discordant})"
         )
 
 
@@ -3114,12 +3757,27 @@ def _display_significance(significance_results: list) -> None:
         f"[dim]Metric: {first.metric} | Test: {first.test_used} | "
         f"Correction: {first.correction_method} | Threshold: p < {first.threshold}[/dim]"
     )
+    # Both notices print before the verdicts rather than after, so they are read
+    # first and so they render once whichever of the three display branches below
+    # runs. Read through getattr: the display stubs in tests/ carry the fields
+    # that predate this one.
+    n_untestable = getattr(first, "n_pairs_untestable", 0)
+    if n_untestable:
+        console.print(
+            f"[yellow]{untestable_pairs_notice(n_untestable, len(significance_results))}"
+            f"[/yellow]"
+        )
+
+    affected = refused_arms(significance_results)
+    if affected:
+        console.print(_significance_caveat_markup(affected))
 
     if n_models == 2:
         r = significance_results[0]
         if r.p_value is None:
             console.print(
-                f"  {r.model_a} vs {r.model_b}: {r.test_used} (no p-value)"
+                f"  {escape(r.model_a)} vs {escape(r.model_b)}: "
+                f"{r.test_used} (no p-value)"
             )
         else:
             sig_marker = "*" if r.significant_at_threshold else ""
@@ -3134,8 +3792,8 @@ def _display_significance(significance_results: list) -> None:
             avg_a = f"{r.mean_a:.3f}" if r.mean_a is not None else "no data"
             avg_b = f"{r.mean_b:.3f}" if r.mean_b is not None else "no data"
             console.print(
-                f"  {r.model_a} (avg {avg_a}) vs "
-                f"{r.model_b} (avg {avg_b}): "
+                f"  {escape(r.model_a)} (avg {avg_a}) vs "
+                f"{escape(r.model_b)} (avg {avg_b}): "
                 f"p={p_display:.4f}{sig_marker}{d_text}"
             )
         return
@@ -3144,7 +3802,9 @@ def _display_significance(significance_results: list) -> None:
         table = Table(title="Pairwise p-values (corrected)", border_style="dim")
         table.add_column("Model", style="cyan")
         for m in models:
-            table.add_column(m, justify="right")
+            # A Table header is rendered as markup exactly like a printed
+            # string, so an id carrying a stray closing tag crashes here too.
+            table.add_column(escape(m), justify="right")
 
         result_map: dict[tuple[str, str], object] = {}
         for r in significance_results:
@@ -3152,7 +3812,8 @@ def _display_significance(significance_results: list) -> None:
             result_map[(r.model_b, r.model_a)] = r
 
         for m_a in models:
-            row = [m_a]
+            # Escaped for display only - the lookup below keys on the raw id.
+            row = [escape(m_a)]
             for m_b in models:
                 if m_a == m_b:
                     row.append("-")
@@ -3191,7 +3852,8 @@ def _display_significance(significance_results: list) -> None:
                 else ""
             )
             console.print(
-                f"  {i}. {r.model_a} vs {r.model_b}: p={p:.4f}{d_text}"
+                f"  {i}. {escape(r.model_a)} vs {escape(r.model_b)}: "
+                f"p={p:.4f}{d_text}"
             )
     else:
         console.print("[dim]No statistically significant pairs found.[/dim]")
@@ -3281,10 +3943,77 @@ def _risk_cell_for_compare(jr: JudgeResult) -> str:
     return f"[{color}]{risk}[/{color}] ({score_text}, n={len(successful)})"
 
 
+def _cost_ceiling_message(ledger: CostLedger) -> str:
+    """What the user is told when the ceiling stopped the run.
+
+    Deliberately says STOPPED FURTHER DISPATCH rather than "prevented spend".
+    A request already with a provider cannot be recalled, and this design
+    finishes it rather than abandoning it - abandoning would lose its cost and
+    make the reported total smaller than the bill. So the honest claim is that
+    no further cell was started, and the figure quoted is what was measured.
+    """
+    return (
+        f"Cost ceiling reached: spent ${ledger.spent:.6f} against "
+        f"--max-cost ${ledger.ceiling:.6f}.\n"
+        f"  Stopped dispatching; {ledger.skipped} call"
+        f"{'s were' if ledger.skipped != 1 else ' was'} never started.\n"
+        f"  Calls already sent to a provider were allowed to finish, so the "
+        f"total above is what was actually measured - the ceiling bounds "
+        f"further dispatch, not spend already committed."
+    )
+
+
 def _print_error(message: str) -> None:
-    """Print an error inside a red-bordered panel."""
-    console.print(Panel(redact_secrets(message), title="Error", border_style="red"))
+    """Print an error inside a red-bordered panel.
+
+    ESCAPE IS LAST AND THE ORDER IS THE WHOLE FIX. `redact_secrets` substitutes
+    key-shaped text, so it can SYNTHESISE a Rich tag: its `\\S+` swallows an
+    intervening bracket and what is left parses as one. Escaping first therefore
+    walks past a tag that does not exist yet, and Rich eats the message -
+    measured on `[x-goog-api-key: AQ.Ab...abcd[not a tag]`, which rendered as an
+    empty panel. Redacting first and escaping the result cannot go wrong,
+    because nothing runs after the escape.
+
+    Escaping does not weaken redaction in either order (56,000 fuzz cases over
+    all fourteen rules, zero survivals), and redaction is idempotent, so the
+    three callers that redact before calling here are harmless.
+
+    No caller may pass Rich markup - the message is now shown as text. A test
+    asserts that across every call site.
+    """
+    console.print(
+        Panel(escape(redact_secrets(message)), title="Error", border_style="red")
+    )
+
+
+def run() -> None:
+    """Console entry point: redact the traceback of an unhandled crash.
+
+    Every provider error already arrives redacted - all four `_reraise` shapes
+    call `redact_secrets` and re-raise `from None`, so the SDK exception never
+    reaches a traceback. What was uncovered is a crash OUTSIDE that path, where
+    Python prints the traceback itself and nothing scrubs it.
+
+    Only one SDK stringifies a key at all: `google.genai.APIError` includes the
+    response body, and `httpx.HTTPStatusError` formats the request URL - and
+    Google is the one provider that carries its key in the URL. Anthropic and
+    OpenAI stringify neither headers nor body, so the exposure is narrow, but
+    it is not empty.
+
+    The traceback is reprinted in full rather than replaced with a summary
+    line. It is the only thing that localises a crash, and a one-line message
+    would trade a leak for an unreportable bug. `SystemExit` (which is how
+    click returns every exit code) and `KeyboardInterrupt` are not caught.
+    """
+    try:
+        main()
+    except Exception:  # noqa: BLE001 - re-raised as a redacted traceback below
+        formatted = "".join(traceback.format_exception(*sys.exc_info()))
+        print(redact_secrets(formatted), file=sys.stderr, end="")
+        # Matches the exit code an unredacted traceback already produced, so
+        # this changes what is printed and nothing else.
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    run()
