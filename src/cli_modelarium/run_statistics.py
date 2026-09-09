@@ -59,6 +59,11 @@ class RunStats:
     n_succeeded: int
     n_refused: int
     n_failed: int
+    # Runs the cost ceiling stopped before dispatch. Its own counter because it
+    # is in none of the three above: `error is None` keeps it out of n_failed
+    # and `_is_cancelled` keeps it out of billed, so without this the three
+    # numbers silently failed to add up to n_runs.
+    n_cancelled: int
 
     # Timing statistics
     latency_mean_ms: float | None
@@ -82,6 +87,17 @@ class RunStats:
     output_diversity: float  # unique_outputs / n_succeeded (1.0 means all unique)
 
 
+def _is_cancelled(state: object) -> bool:
+    """True when the cost ceiling stopped this cell before it returned.
+
+    Read through `getattr`: the significance and paired-sample tests drive these
+    filters with duck-typed stand-ins carrying only the fields they exercise, so
+    a direct attribute access would raise there rather than fail a meaningful
+    assertion - the same reason `refused_arms` reads that way.
+    """
+    return getattr(state, "status", None) == "cancelled"
+
+
 def compute_run_stats(states: list[StreamState]) -> RunStats:
     """Compute statistics from a group of N runs.
 
@@ -95,12 +111,17 @@ def compute_run_stats(states: list[StreamState]) -> RunStats:
     # derived from the output belongs in the second, because a refusal
     # contributes an empty string and would make a cell that answered nothing
     # read as maximally consistent.
-    billed = [s for s in states if s.error is None]
+    # A cancelled cell is excluded from every sample: it has `error is None`, so
+    # the old filter counted it as SUCCEEDED and let its partial latency drag
+    # the mean. Its cost is unknown rather than zero, so it cannot join a total
+    # either.
+    billed = [s for s in states if s.error is None and not _is_cancelled(s)]
     answered = [s for s in billed if not s.refused]
     failed = [s for s in states if s.error is not None]
     n_succeeded = len(answered)
     n_refused = len(billed) - len(answered)
     n_failed = len(failed)
+    n_cancelled = sum(1 for s in states if s.error is None and _is_cancelled(s))
 
     latencies = [s.latency_ms for s in billed if s.latency_ms is not None]
     ttfts = [s.ttft_ms for s in billed if s.ttft_ms is not None]
@@ -152,6 +173,7 @@ def compute_run_stats(states: list[StreamState]) -> RunStats:
         n_succeeded=n_succeeded,
         n_refused=n_refused,
         n_failed=n_failed,
+        n_cancelled=n_cancelled,
         latency_mean_ms=latency_mean_ms,
         latency_median_ms=latency_median_ms,
         latency_stdev_ms=latency_stdev_ms,
@@ -225,7 +247,10 @@ class SignificanceResult:
     p_value: float | None  # None when no test could be run
     p_value_corrected: float | None  # None when raw p_value is None
     correction_method: str  # "bonferroni", "holm", or "none"
-    n_comparisons: int  # Total pairwise comparisons (drives correction)
+    # The number of hypotheses the correction was applied over - the pairs that
+    # produced a p-value, NOT every pair that was formed. It was the latter, so
+    # a pair no test could run on still inflated every other pair's correction.
+    n_comparisons: int
     effect_size: float | None  # Cohen's d (None when undefined)
     effect_size_interpretation: str  # "negligible", "small", "medium", "large", "undefined"
     threshold: float  # User-specified significance threshold
@@ -240,6 +265,16 @@ class SignificanceResult:
     bootstrap_seed: int | None = None
     effect_size_ci_low: float | None = None
     effect_size_ci_high: float | None = None
+    # Pairs that produced no p-value and therefore spend no budget.
+    # `n_comparisons + n_pairs_untestable` is the number of pairs formed.
+    # Defaulted, like the fields below it, so a caller building this by hand does
+    # not have to know about it and the display stubs in tests/ still construct.
+    n_pairs_untestable: int = 0
+    # How many of each arm's runs were declines. Defaulted so the shape
+    # stays backward compatible, and so a caller building this by hand
+    # does not have to know about them.
+    n_refused_a: int = 0
+    n_refused_b: int = 0
 
 
 def cohens_d(sample_a: list[float], sample_b: list[float]) -> float | None:
@@ -469,7 +504,7 @@ def _extract_metric_samples(
         # Latency and cost were really measured and really billed on a
         # refusal; output_tokens was not an answer, so refusals are dropped
         # from that metric only.
-        billed = [s for s in states if s.error is None]
+        billed = [s for s in states if s.error is None and not _is_cancelled(s)]
         if metric == "latency_ms":
             samples[model] = [float(s.latency_ms) for s in billed if s.latency_ms is not None]
         elif metric == "output_tokens":
@@ -479,6 +514,16 @@ def _extract_metric_samples(
         else:
             raise ValueError(f"Unknown metric: {metric}")
     return samples
+
+
+def _count_refused(states: list[Any] | None) -> int:
+    """Declines among a model's runs.
+
+    Read with a default because the significance functions are driven by
+    hand-built states in several tests, and a state without the attribute
+    simply had no refusal to report.
+    """
+    return sum(1 for s in states or [] if getattr(s, "refused", False))
 
 
 def compute_pairwise_significance(
@@ -537,7 +582,6 @@ def compute_pairwise_significance(
     for i, model_a in enumerate(models):
         for model_b in models[i + 1 :]:
             pairs.append((model_a, model_b))
-    n_comparisons = len(pairs)
 
     raw_results: list[dict[str, Any]] = []
     raw_p_values: list[float] = []
@@ -635,21 +679,73 @@ def compute_pairwise_significance(
         )
         raw_p_values.append(p_value)
 
+    # Only pairs that produced a p-value spend the multiple-comparison budget.
+    # Every pair used to, because an untestable one appended a placeholder 1.0 to
+    # `raw_p_values` - which inflated Bonferroni's multiplier and occupied a rank
+    # slot in Holm's step-down, so every testable pair's PUBLISHED p-value paid for
+    # a test that never ran. On three models where one was too small to test, a
+    # difference at p=0.036168 was published as 0.108504 and reported as not
+    # significant.
+    #
+    # The vector is FILTERED rather than a divisor redefined, and that is not a
+    # style choice: `holm_correct` takes no divisor at all - it reads
+    # `len(p_values)` internally - so redefining one never reaches it. Filtering
+    # also makes `bonferroni_correct(non_empty, 0)`, which returns all zeros and
+    # would read as every pair significant, structurally unreachable: the count and
+    # the vector come from the same list, so n == 0 only when the vector is empty,
+    # and the empty guard fires first.
+    #
+    # THE PREDICATE. Three branches above produce no test, and only two of them
+    # qualify:
+    #   insufficient_samples  p_value None  - no test was run
+    #   zero_variance         p_value None  - no test was run (see below)
+    #   trivial               p_value 1.0   - a REAL result: two constant, equal
+    #                                         samples genuinely do not differ, so
+    #                                         it spends the budget like any other
+    #                                         tested hypothesis
+    # Filtering on a `test_used` allowlist, or on the raw value being 1.0, evicts
+    # `trivial` and shrinks the budget on a run where nothing was untestable.
+    #
+    # `zero_variance` - constant samples with DIFFERENT means - is deliberately
+    # out. The difference is certain in the sample and the test is still undefined:
+    # with no observed variance there is no sampling distribution, so there is no
+    # p-value to correct, and charging the budget for it would make every other
+    # pair pay for an inference that was never drawn. The pair stays visible
+    # (`test_used` says so and the display renders it) rather than silently
+    # spending someone else's budget.
+    #
+    # `math.isfinite` is not decoration. `paired_t_test` on identical aligned
+    # samples returns NaN; `sorted()` cannot order a NaN, so its rank in Holm's
+    # step-down is an artifact of list length and input order - which means a
+    # filtered vector could REVERSE-flip a real verdict from significant to null,
+    # the one direction that hurts someone who already published. A NaN also
+    # reaches `min(1.0, running_max)` as 0.0 and publishes itself as significant.
+    # For finite p-values a reverse flip is impossible.
+    tested_indices = [
+        i
+        for i, r in enumerate(raw_results)
+        if r["p_value"] is not None and math.isfinite(r["p_value"])
+    ]
+    tested_p_values = [raw_results[i]["p_value"] for i in tested_indices]
+    n_comparisons = len(tested_indices)
+    n_pairs_untestable = len(raw_results) - n_comparisons
+
     if correction == "bonferroni":
-        corrected_p_values = bonferroni_correct(raw_p_values, n_comparisons)
+        tested_corrected = bonferroni_correct(tested_p_values, n_comparisons)
     elif correction == "holm":
-        corrected_p_values = holm_correct(raw_p_values)
+        tested_corrected = holm_correct(tested_p_values)
     else:
-        corrected_p_values = list(raw_p_values)
+        tested_corrected = list(tested_p_values)
+    # Remapped by original index rather than by re-zipping: the shortened vector no
+    # longer aligns with `raw_results`, and the naive alternative - leaving the
+    # strict zip in place - raises a ValueError that cli.py catches, dropping the
+    # ENTIRE significance block from the saved report at exit 0.
+    corrected_by_index = dict(zip(tested_indices, tested_corrected, strict=True))
 
     final_results: list[SignificanceResult] = []
-    for r, corrected_p in zip(raw_results, corrected_p_values, strict=True):
-        if r["p_value"] is None:
-            corrected: float | None = None
-            significant = False
-        else:
-            corrected = corrected_p
-            significant = corrected_p < threshold
+    for index, r in enumerate(raw_results):
+        corrected: float | None = corrected_by_index.get(index)
+        significant = corrected is not None and corrected < threshold
 
         final_results.append(
             SignificanceResult(
@@ -669,10 +765,13 @@ def compute_pairwise_significance(
                 p_value_corrected=corrected,
                 correction_method=correction,
                 n_comparisons=n_comparisons,
+                n_pairs_untestable=n_pairs_untestable,
                 effect_size=r["effect_size"],
                 effect_size_interpretation=cohens_d_interpretation(r["effect_size"]),
                 threshold=threshold,
                 significant_at_threshold=significant,
+                n_refused_a=_count_refused(states_by_model.get(r["model_a"])),
+                n_refused_b=_count_refused(states_by_model.get(r["model_b"])),
             )
         )
 
@@ -723,16 +822,28 @@ class McNemarResult:
     a_fail_b_pass: int  # discordant: c
     both_fail: int
     n_discordant: int
-    a_pass_rate: float
-    b_pass_rate: float
-    chi2_statistic: float | None  # None when exact binomial used
-    p_value: float | None  # None when n_discordant == 0
+    # Runs where BOTH models produced a judged outcome - the denominator of the
+    # two rates below, and the table's total. None rates when it is zero: there
+    # is no rate over an empty denominator, and 0.0 rendered as "0% pass" beside
+    # a genuinely-zero-scoring model.
+    n_paired: int
+    a_pass_rate: float | None
+    b_pass_rate: float | None
+    chi2_statistic: float | None  # None for the exact test AND when no test ran
+    p_value: float | None  # None when there were no paired runs to test
     p_value_corrected: float | None
     correction_method: str  # "bonferroni", "holm", "none"
+    # Pairs that produced a p-value, NOT every pair formed - the same meaning
+    # the field carries on SignificanceResult, so one payload has one definition.
     n_comparisons: int
     threshold: float
     significant_at_threshold: bool
-    method: str  # "exact_binomial" or "edwards_chi2"
+    # "exact_binomial", "edwards_chi2", "no_discordant" (paired runs, none of
+    # them discordant - a real result) or "no_paired_runs" (nothing to compare).
+    method: str
+    # Pairs that produced no p-value and therefore spend no budget. Defaulted so
+    # a caller building this by hand does not have to know about it.
+    n_pairs_untestable: int = 0
 
 
 def bootstrap_ci(
@@ -964,7 +1075,7 @@ def _extract_paired_metric_samples(
     for model, states in states_by_model.items():
         # Same split as the independent path: refusals keep their timing and
         # cost, but are not an output sample.
-        billed = [s for s in states if s.error is None]
+        billed = [s for s in states if s.error is None and not _is_cancelled(s)]
         if metric == "latency_ms":
             samples_by_model[model] = {
                 _pair_key(s): float(s.latency_ms) for s in billed if s.latency_ms is not None
@@ -1026,23 +1137,38 @@ def compute_stats_with_cis(
     ci_method: str = "bca",
     n_resamples: int = 5000,
     seed: int | None = None,
-) -> dict[str, dict[str, ConfidenceInterval | None]]:
-    """Compute bootstrap CIs on per-model metric means.
+) -> dict[tuple[str, float, str | None], dict[str, ConfidenceInterval | None]]:
+    """Compute bootstrap CIs on per-CELL metric means.
 
-    Returns {model: {metric_name: ConfidenceInterval | None}} for the
-    four base metrics (latency_ms, output_tokens, cost_usd, plus score
-    when judge_results provided).
+    Returns {(model, temperature, system): {metric_name: ConfidenceInterval |
+    None}} for the four base metrics (latency_ms, output_tokens, cost_usd, plus
+    score when judge_results provided).
+
+    Keyed by cell, not by model, because that is the grain the per-cell record
+    uses. Pooling a model's cells produced an interval whose width was the
+    spread BETWEEN cells rather than sampling error, and stamping it onto every
+    cell published a 95% interval that contained neither mean it labelled. The
+    tuple is the same one `group_states_by_cell` builds, so it matches the
+    record's key exactly.
+
+    Takes the per-model grouping the caller already has and regroups here, so
+    no call site needs to know.
     """
-    out: dict[str, dict[str, ConfidenceInterval | None]] = {}
+    out: dict[tuple[str, float, str | None], dict[str, ConfidenceInterval | None]] = {}
     metrics = ["latency_ms", "output_tokens", "cost_usd"]
     if judge_results:
         metrics.append("score")
 
+    states_by_cell: dict[tuple[str, float, str | None], list[Any]] = {}
+    for model_states in states_by_model.values():
+        for state in model_states:
+            states_by_cell.setdefault(
+                (state.model, state.temperature, state.system_prompt), []
+            ).append(state)
+
     for metric in metrics:
-        samples_by_model = _extract_metric_samples(
-            states_by_model, judge_results, metric
-        )
-        for model, samples in samples_by_model.items():
+        samples_by_cell = _extract_metric_samples(states_by_cell, judge_results, metric)
+        for cell, samples in samples_by_cell.items():
             ci = bootstrap_ci(
                 samples,
                 statistic=np.mean,
@@ -1051,7 +1177,7 @@ def compute_stats_with_cis(
                 n_resamples=n_resamples,
                 seed=seed,
             )
-            out.setdefault(model, {})[metric] = ci
+            out.setdefault(cell, {})[metric] = ci
     return out
 
 
@@ -1065,10 +1191,18 @@ def compute_mcnemar_pairwise(
 ) -> list[McNemarResult]:
     """Pairwise McNemar's tests on hallucination pass/fail outcomes.
 
-    "Pass" is defined as judge.aggregated_risk_level != "High". Runs
-    where either model's judge result is missing (or the model failed)
-    are skipped for that pair. Intersection on run_index gives the
-    set of paired runs used for the 2x2 table.
+    "Pass" is defined as judge.aggregated_risk_level != "High". Runs where
+    either model's judge result is missing (or the model failed or declined) are
+    genuinely skipped for that pair. Intersection on `_pair_key` - the whole
+    observation - gives the set of paired runs used for the 2x2 table.
+
+    The key was `run_index` alone, which is not an observation: with more than
+    one temperature or system prompt it repeats in every cell, so later cells
+    OVERWROTE earlier ones and the "skipped" promise above was false - a run
+    skipped in one cell had its slot refilled from another. A two-temperature,
+    five-run comparison put twenty observations in and tabulated five, and the
+    published pass rate was whichever cell happened to be written last: the same
+    data reported 0% or 100% for a model that passed 50%.
 
     Returns one McNemarResult per unordered (model_a, model_b) pair.
     """
@@ -1076,10 +1210,23 @@ def compute_mcnemar_pairwise(
     if len(models) < 2:
         return []
 
-    # Build per-model {run_index: pass_bool} using state_id -> judge lookup.
-    outcomes_by_model: dict[str, dict[int, bool]] = {}
+    # Build per-model {observation: pass_bool} using state_id -> judge lookup.
+    # `_pair_key` is (temperature, system_prompt, run_index) - the same key
+    # `_extract_paired_metric_samples` uses for this exact collision. It is NOT
+    # the cell tuple `group_states_by_cell` builds: that one names a cell and
+    # includes the model, while this one names one observation WITHIN a model so
+    # two models' observations can be intersected. Merging them would be wrong.
+    #
+    # There is no broadcast-verdict handling here and none is needed: this
+    # function runs only under `hallucination_config is not None` (cli.py), and
+    # mode-only judging - the only thing that broadcasts one verdict across a
+    # cell - runs only when that config is None. The two are mutually exclusive.
+    # If those paths are ever joined, this key would count one broadcast verdict
+    # once per run and would need the same `_broadcast` guard the paired
+    # extractor carries.
+    outcomes_by_model: dict[str, dict[PairKey, bool]] = {}
     for model, states in states_by_model.items():
-        m: dict[int, bool] = {}
+        m: dict[PairKey, bool] = {}
         for s in states:
             if s.error is not None or s.refused:
                 # A refusal is neither a hallucination pass nor a fail.
@@ -1090,21 +1237,21 @@ def compute_mcnemar_pairwise(
             risk = getattr(jr, "aggregated_risk_level", None)
             if risk is None:
                 continue
-            m[s.run_index] = risk != "High"
+            m[_pair_key(s)] = risk != "High"
         outcomes_by_model[model] = m
 
     pairs: list[tuple[str, str]] = []
     for i, a in enumerate(models):
         for b in models[i + 1 :]:
             pairs.append((a, b))
-    n_comparisons = len(pairs)
 
     raw: list[dict[str, Any]] = []
-    raw_p_values: list[float] = []
     for a, b in pairs:
         outcomes_a = outcomes_by_model.get(a, {})
         outcomes_b = outcomes_by_model.get(b, {})
-        common = sorted(set(outcomes_a.keys()) & set(outcomes_b.keys()))
+        common = sorted(
+            set(outcomes_a.keys()) & set(outcomes_b.keys()), key=_pair_sort_key
+        )
 
         both_pass = a_pass_b_fail = a_fail_b_pass = both_fail = 0
         for idx in common:
@@ -1119,18 +1266,28 @@ def compute_mcnemar_pairwise(
                 both_fail += 1
 
         n_paired = len(common)
-        a_pass_rate = (both_pass + a_pass_b_fail) / n_paired if n_paired else 0.0
-        b_pass_rate = (both_pass + a_fail_b_pass) / n_paired if n_paired else 0.0
         n_discordant = a_pass_b_fail + a_fail_b_pass
 
-        chi2_stat, p_value = mcnemar_test(a_pass_b_fail, a_fail_b_pass)
-        # method label for downstream display
-        if n_discordant == 0:
-            method_label = "no_discordant"
-        elif n_discordant < 25:
-            method_label = "exact_binomial"
+        if n_paired == 0:
+            # Nothing was compared. This used to run the test anyway and publish
+            # `p_value=1.0` over an empty table beside `0%` pass rates - the same
+            # shape a genuinely tested pair takes. `no_discordant` could not tell
+            # it apart either: that label also covers ten paired runs the models
+            # agreed on, which is a real result.
+            chi2_stat, p_value = None, None
+            a_pass_rate = b_pass_rate = None
+            method_label = "no_paired_runs"
         else:
-            method_label = "edwards_chi2"
+            a_pass_rate = (both_pass + a_pass_b_fail) / n_paired
+            b_pass_rate = (both_pass + a_fail_b_pass) / n_paired
+            chi2_stat, p_value = mcnemar_test(a_pass_b_fail, a_fail_b_pass)
+            method_label = (
+                "no_discordant"
+                if n_discordant == 0
+                else "exact_binomial"
+                if n_discordant < 25
+                else "edwards_chi2"
+            )
 
         raw.append(
             {
@@ -1142,6 +1299,7 @@ def compute_mcnemar_pairwise(
                 "a_fail_b_pass": a_fail_b_pass,
                 "both_fail": both_fail,
                 "n_discordant": n_discordant,
+                "n_paired": n_paired,
                 "a_pass_rate": a_pass_rate,
                 "b_pass_rate": b_pass_rate,
                 "chi2_statistic": chi2_stat,
@@ -1149,24 +1307,34 @@ def compute_mcnemar_pairwise(
                 "method": method_label,
             }
         )
-        # If p_value is None (no discordant pairs), treat as p=1.0 for correction.
-        raw_p_values.append(p_value if p_value is not None else 1.0)
+
+    # Only pairs that were actually compared spend the multiple-comparison budget,
+    # so `n_comparisons` means the same thing here as it does on
+    # SignificanceResult: pairs tested, not pairs formed. Every pair used to
+    # contribute - a pair with no paired runs pushed a placeholder 1.0 into the
+    # vector and inflated everyone else's correction.
+    #
+    # The discriminator is `n_paired == 0`, NOT a None p-value. `mcnemar_test`
+    # never returns a None p-value - the None in its `(None, 1.0)` return is the
+    # chi2 slot - so filtering on that would remove exactly zero rows. It is only
+    # None here because the branch above declines to call it at all.
+    tested_indices = [i for i, r in enumerate(raw) if r["p_value"] is not None]
+    tested_p_values = [raw[i]["p_value"] for i in tested_indices]
+    n_comparisons = len(tested_indices)
+    n_pairs_untestable = len(raw) - n_comparisons
 
     if correction == "bonferroni":
-        corrected = bonferroni_correct(raw_p_values, n_comparisons)
+        tested_corrected = bonferroni_correct(tested_p_values, n_comparisons)
     elif correction == "holm":
-        corrected = holm_correct(raw_p_values)
+        tested_corrected = holm_correct(tested_p_values)
     else:
-        corrected = list(raw_p_values)
+        tested_corrected = list(tested_p_values)
+    corrected_by_index = dict(zip(tested_indices, tested_corrected, strict=True))
 
     results: list[McNemarResult] = []
-    for r, c_p in zip(raw, corrected, strict=True):
-        if r["p_value"] is None:
-            corrected_p: float | None = None
-            sig = False
-        else:
-            corrected_p = c_p
-            sig = c_p < threshold
+    for index, r in enumerate(raw):
+        corrected_p: float | None = corrected_by_index.get(index)
+        sig = corrected_p is not None and corrected_p < threshold
         results.append(
             McNemarResult(
                 model_a=r["model_a"],
@@ -1177,6 +1345,7 @@ def compute_mcnemar_pairwise(
                 a_fail_b_pass=r["a_fail_b_pass"],
                 both_fail=r["both_fail"],
                 n_discordant=r["n_discordant"],
+                n_paired=r["n_paired"],
                 a_pass_rate=r["a_pass_rate"],
                 b_pass_rate=r["b_pass_rate"],
                 chi2_statistic=r["chi2_statistic"],
@@ -1184,6 +1353,7 @@ def compute_mcnemar_pairwise(
                 p_value_corrected=corrected_p,
                 correction_method=correction,
                 n_comparisons=n_comparisons,
+                n_pairs_untestable=n_pairs_untestable,
                 threshold=threshold,
                 significant_at_threshold=sig,
                 method=r["method"],
