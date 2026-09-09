@@ -28,6 +28,8 @@ import re
 import keyring
 import keyring.errors
 
+from cli_modelarium.exceptions import InvalidKeyFormatError
+
 SERVICE_NAME = "cli-modelarium"
 
 # Reserved keyring entry name for the user's saved local-provider base URL.
@@ -93,6 +95,29 @@ REDACT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"nvapi-[A-Za-z0-9_-]{10,}"), "nvapi-***REDACTED***"),
     (re.compile(r"sk-[A-Za-z0-9_-]{10,}"), "sk-***REDACTED***"),
     (re.compile(r"AIza[A-Za-z0-9_-]{20,}"), "AIza***REDACTED***"),
+    # Google's `AQ.Ab` Auth key replaces the `AIza` Standard key, which the API
+    # stops accepting in September 2026. `KEY_PATTERNS["google"]` gained the dot
+    # that lets it accept the new format without these rules landing beside it,
+    # so the tool accepted a shape it could not redact. Three rules are needed
+    # because neither header rule below reaches the new shapes: `x-api-key:`
+    # does not match `x-goog-api-key:`, and `api[-_]?key=` does not match the
+    # bare `?key=` that Gemini's REST URL carries.
+    #
+    # ORDER WITHIN THIS GROUP MATTERS. The query rule runs before the bare
+    # prefix rule: reversed, the prefix rule redacts the key inside the URL and
+    # the query rule then matches the `?key=AQ.Ab` that is left, redacting a
+    # second time. The replacement is a backreference so `&key=` stays `&key=`
+    # - a literal `?key=` turns a second query parameter into a second query
+    # start and corrupts the URL.
+    (
+        re.compile(r"([?&])key=[A-Za-z0-9_\-.]+", re.IGNORECASE),
+        r"\1key=***REDACTED***",
+    ),
+    (
+        re.compile(r"x-goog-api-key:\s*\S+", re.IGNORECASE),
+        "x-goog-api-key: ***REDACTED***",
+    ),
+    (re.compile(r"AQ\.Ab[A-Za-z0-9_\-.]{20,}"), "AQ.Ab***REDACTED***"),
     (
         re.compile(r"Authorization:\s*Bearer\s+\S+", re.IGNORECASE),
         "Authorization: Bearer ***REDACTED***",
@@ -138,12 +163,17 @@ def save_key(provider: str, key: str) -> None:
     """Save an API key to the OS-native keychain after format validation.
 
     Raises:
-        ValueError: if the key format does not match the provider's pattern.
+        InvalidKeyFormatError: if the key format does not match the provider's
+            pattern. It subclasses `ValueError`, so the documented contract and
+            every existing `except ValueError` caller are unchanged.
         keyring.errors.KeyringError: if the keychain backend is unavailable.
     """
     normalized = normalize_key(key)
     if not validate_key(provider, normalized):
-        raise ValueError(
+        # The message deliberately does not include the key: it is rendered to
+        # the user, and redaction only helps if the wording never carried the
+        # secret to begin with.
+        raise InvalidKeyFormatError(
             f"Invalid API key format for {provider}. Please check the key and try again."
         )
     keyring.set_password(SERVICE_NAME, provider, normalized)
@@ -194,10 +224,10 @@ def is_key_configured(provider: str) -> bool:
 
 # ===== Local provider base URL =====
 #
-# The local provider doesn't take an API key, but users still want to persist
-# a non-default URL (e.g. LM Studio at :1234). We use the keyring for the same
-# reasons we use it for API keys: per-user, OS-native storage that survives
-# reboots and doesn't end up in shell history or dotfiles.
+# The local provider doesn't take an API key, but a non-default URL (e.g. LM
+# Studio at :1234) still has to persist. The keyring holds it for the same
+# reasons it holds API keys: per-user, OS-native storage that survives reboots
+# and doesn't end up in shell history or dotfiles.
 
 
 def save_local_url(url: str) -> None:
