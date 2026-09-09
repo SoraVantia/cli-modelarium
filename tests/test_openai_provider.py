@@ -260,6 +260,40 @@ async def test_rate_limit_without_retry_after_header(monkeypatch: pytest.MonkeyP
     assert exc_info.value.retry_after is None
 
 
+@pytest.mark.parametrize("status", [502, 503, 504])
+async def test_transient_5xx_is_retryable(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    """502/503/504 must reach the retry loop, which catches ProviderOverloadedError.
+
+    Before this mapping existed only 429 and 529 were retryable, so a 503 became
+    a bare ProviderError - a dead cell at 0 tokens while the rest of the sweep
+    was billed. Nine providers inherit this `_reraise`, so this covers them all.
+    """
+    err = openai.APIStatusError(
+        "upstream unavailable",
+        response=_build_response(status),
+        body=None,
+    )
+    provider, _ = _make_provider(monkeypatch, error=err)
+
+    with pytest.raises(ProviderOverloadedError):
+        await provider.complete("p", "gpt-5.5", 0.0)
+
+
+async def test_500_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A generic 500 can be a deterministic failure of this request; retrying bills it again."""
+    err = openai.APIStatusError(
+        "internal error",
+        response=_build_response(500),
+        body=None,
+    )
+    provider, _ = _make_provider(monkeypatch, error=err)
+
+    with pytest.raises(ProviderError):
+        await provider.complete("p", "gpt-5.5", 0.0)
+
+
 async def test_529_overloaded_translated(monkeypatch: pytest.MonkeyPatch) -> None:
     err = openai.APIStatusError(
         "service overloaded",
