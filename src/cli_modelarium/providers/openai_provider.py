@@ -21,7 +21,7 @@ from cli_modelarium.exceptions import (
     RateLimitError,
 )
 from cli_modelarium.pricing import calculate_cost, rejects_sampling_params
-from cli_modelarium.providers._utils import extract_retry_after
+from cli_modelarium.providers._utils import TRANSIENT_STATUS_CODES, extract_retry_after
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
 from cli_modelarium.security import redact_secrets
 
@@ -183,6 +183,8 @@ class OpenAIProvider(BaseProvider):
         if isinstance(error, openai.RateLimitError):
             retry_after = extract_retry_after(error)
             raise RateLimitError(message, provider=self.name, retry_after=retry_after) from None
-        if isinstance(error, openai.APIStatusError) and getattr(error, "status_code", None) == 529:
+        if isinstance(error, openai.APIStatusError) and (
+            getattr(error, "status_code", None) in TRANSIENT_STATUS_CODES
+        ):
             raise ProviderOverloadedError(message, provider=self.name) from None
         raise ProviderError(message, provider=self.name) from None
