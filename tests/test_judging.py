@@ -217,7 +217,7 @@ class TestBuildJudgePrompt:
         assert prompt == "EVAL: - only :: orig :: resp"
 
     def test_rendered_prompt_has_no_escaped_braces(self) -> None:
-        """The example the judge is shown must be the JSON we want back.
+        """The example the judge is shown must be the JSON the parser expects back.
 
         build_judge_prompt substitutes with str.replace, so `{{` is never
         unescaped - it reaches the model verbatim, and a judge that copies
