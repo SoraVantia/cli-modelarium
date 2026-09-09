@@ -40,7 +40,7 @@ class TestWelchTTest:
         assert abs(p - 9.8717e-6) < 1e-7
 
     def test_matches_scipy_oracle(self) -> None:
-        """Our wrapper must produce the same numbers as scipy.stats.ttest_ind."""
+        """The wrapper must produce the same numbers as scipy.stats.ttest_ind."""
         t, df, p = welch_t_test(SAMPLE_A, SAMPLE_B)
         oracle = scipy_stats.ttest_ind(SAMPLE_A, SAMPLE_B, equal_var=False)
         assert abs(t - float(oracle.statistic)) < 1e-12
