@@ -52,8 +52,20 @@ class KeyNotConfiguredError(ConfigurationError):
         )
 
 
-class InvalidKeyFormatError(ConfigurationError):
-    """Raised when an API key fails format validation."""
+class InvalidKeyFormatError(ConfigurationError, ValueError):
+    """Raised when an API key fails format validation.
+
+    ALSO a `ValueError`, deliberately. `save_key` documents `Raises: ValueError`
+    and both of its callers catch that: `keys set` renders a panel, and
+    `configure` increments its `invalid` counter and prints "Invalid format".
+    A plain `ConfigurationError` is not a `ValueError`, so raising one would
+    have made `keys set` crash with a traceback and made `configure` fall
+    through to its broad `except Exception`, reporting a malformed key as
+    `not_stored` - "Could not save" - with `invalid` stuck at 0.
+
+    Subclassing both keeps every existing handler correct and lets a caller
+    that wants the specific case catch it by name.
+    """
 
 
 class UnknownModelError(ConfigurationError):
@@ -86,7 +98,17 @@ class UnknownProviderError(ConfigurationError):
 
 
 class CostLimitExceededError(ModelariumError):
-    """Raised when estimated or actual cost exceeds the user's --max-cost ceiling."""
+    """Raised when estimated or actual cost exceeds the user's --max-cost ceiling.
+
+    NOT raised by the CLI, deliberately. Enforcement checks the ledger after the
+    output has been written - so the user keeps the cells they paid for - and at
+    that point the command has only to report and exit, with no exception to
+    propagate. Raising one from inside the run would discard the partial
+    artifact, which is the opposite of what the ceiling should cost someone.
+
+    It stays for the library boundary: a caller driving `run_streaming_comparison`
+    with a `CostLedger` of its own has a typed condition to signal.
+    """
 
 
 class BatchValidationError(ModelariumError):
