@@ -125,10 +125,15 @@ class TestRunsEqualsOneOutputUnchanged:
         baseline = _format_json(results)
         with_runs_one = _format_json(results, runs=1)
         assert baseline == with_runs_one
-        # Confirm no run_index/total_runs/stats_by_cell leaked in.
+        # `total_runs` and `run_index` are both unconditional now and both
+        # read their single-run value - they are the keys a consumer reads by
+        # value rather than by presence. Byte-identity survives because the
+        # field is added to BOTH sides: the assertion above is what proves it.
+        # `stats_by_cell` is still gated, and correctly so - it is an aggregate
+        # that does not exist at one run.
         parsed = json.loads(baseline)
-        assert "run_index" not in parsed["results"][0]
-        assert "total_runs" not in parsed
+        assert parsed["results"][0]["run_index"] == 0
+        assert parsed["total_runs"] == 1
         assert "stats_by_cell" not in parsed
 
     def test_markdown_format_byte_identical_when_runs_one(self) -> None:
@@ -180,7 +185,9 @@ class TestRunsAboveOneOutputExtended:
         ]
         out = _format_markdown(results, runs=3)
         assert "Per-cell statistical summary" in out
-        assert "OK/Fail" in out
+        # Markdown carries the full words; the console uses `OK/R/F` because the
+        # long form truncates at 100 columns.
+        assert "OK/Ref/Fail" in out
         assert "CV" in out
 
 
@@ -237,11 +244,16 @@ class TestRunsAndOutputFileIntegration:
         )
         assert result.exit_code == 0, result.output
         parsed = json.loads(out.read_text())
-        # No runs-related top-level fields.
-        assert "total_runs" not in parsed
+        # `total_runs` is always present and reads 1; `stats_by_cell` is still
+        # runs-gated.
+        assert parsed["total_runs"] == 1
         assert "stats_by_cell" not in parsed
-        # No run_index in per-result dicts.
-        assert "run_index" not in parsed["results"][0]
+        # `run_index` is always present too, and reads 0 on every row of a
+        # single-run file. That gives a consumer one join-key shape at every
+        # run count instead of two to branch on - it does NOT separate two
+        # cells that share a triple, where every row reads 0. See
+        # test_payload_discriminators.py.
+        assert all(r["run_index"] == 0 for r in parsed["results"])
 
     def test_runs_writes_csv_with_run_index(
         self, fake_provider: _RecordingProvider, tmp_path: Path
