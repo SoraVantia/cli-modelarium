@@ -12,6 +12,7 @@ Covers the orchestrator behaviours:
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -180,8 +181,8 @@ async def test_ttft_recorded_for_each_state() -> None:
         live_display=False,
     )
 
-    # TTFT must be captured on the first chunk and be non-negative. We do NOT
-    # assert a minimum magnitude: on Windows, asyncio sleep granularity and OS
+    # TTFT must be captured on the first chunk and be non-negative. No minimum
+    # magnitude is asserted: on Windows, asyncio sleep granularity and OS
     # timer coalescing can make a 10ms artificial delay measure as ~0ms, so a
     # magnitude floor is platform-fragile. The "captured on first chunk"
     # contract is covered here (is not None) and by
@@ -326,6 +327,108 @@ async def test_rate_limit_retries_then_succeeds(fake_sleep: Any) -> None:
     assert states[0].text == "ok after retry"
     assert states[0].attempts == 1  # retry was attempted
     assert fake_sleep.calls == [RATE_LIMIT_BASE_DELAY_SECONDS]
+
+
+# ===== TTFT is measured per attempt, not from the first attempt =====
+
+
+def test_retry_rebases_the_ttft_clock_so_it_excludes_earlier_attempts() -> None:
+    """A retry must not fold the failed attempt and the backoff into TTFT.
+
+    `mark_started` runs once per cell. Before `mark_attempt_start` existed,
+    `_start` kept that original instant and `append_text` recomputed TTFT
+    against it on the attempt that finally succeeded, so the reported figure
+    absorbed every failed attempt AND every backoff sleep. Reproduced with the
+    real StreamState: 650 ms reported for an attempt whose true
+    time-to-first-token was near zero.
+
+    The consequence was not cosmetic. Rate limiting correlates with provider
+    and model, so the inflation landed on whichever model was throttled and
+    silently reordered a latency comparison.
+    """
+    state = StreamState(model="m", provider_name="p", temperature=0.0)
+    state.mark_started()
+    time.sleep(0.15)  # the first attempt runs, then raises
+    # What the retry path clears before sleeping:
+    state.text = ""
+    state.ttft_ms = None
+    time.sleep(0.20)  # the backoff
+    state.mark_attempt_start()  # re-based AFTER the backoff
+    state.append_text("hi")
+
+    assert state.ttft_ms is not None
+    # Without the re-base this is ~350 ms - the two sleeps above.
+    assert state.ttft_ms < 100, state.ttft_ms
+
+
+async def test_provider_ttft_overwrites_the_orchestrator_estimate_after_a_retry(
+    fake_sleep: Any,
+) -> None:
+    """The provider measures TTFT and latency off one per-attempt clock.
+
+    `append_text` fills in an orchestrator-level estimate so the live display
+    has something to show mid-call, but it is measured from a different instant.
+    At the end the provider's own figure wins, which is what keeps `ttft_ms` and
+    `latency_ms` describing the same attempt.
+    """
+    success = CompletionResult(
+        output="ok after retry",
+        provider="openai",
+        ttft_ms=12.5,
+        latency_ms=40.0,
+    )
+    provider = _FailingProvider(
+        "openai",
+        errors=[RateLimitError("limit", provider="openai", retry_after=None)],
+        success_result=success,
+    )
+
+    states = await run_streaming_comparison(
+        prompt="p",
+        models=["gpt-5.5"],
+        temperatures=[0.0],
+        system_prompts=[None],
+        provider_factory=lambda _: provider,
+        live_display=False,
+        sleep=fake_sleep,
+    )
+
+    assert provider.attempt_count == 2
+    assert states[0].attempts == 1
+    # Both come from the successful attempt, off the same clock.
+    assert states[0].ttft_ms == 12.5
+    assert states[0].latency_ms == 40.0
+
+
+async def test_backoff_time_is_not_charged_to_ttft_when_the_provider_reports_none() -> None:
+    """Pins the re-base CALL SITE, not just the method.
+
+    When the provider reports no TTFT of its own, the orchestrator estimate is
+    what gets recorded - so this is the path where a stale `_start` is visible
+    in the output. A real (short) backoff is slept so wall-clock time actually
+    passes between the first attempt and the successful one.
+    """
+    success = CompletionResult(output="ok", provider="openai", ttft_ms=None)
+    provider = _FailingProvider(
+        "openai",
+        errors=[RateLimitError("limit", provider="openai", retry_after=0.20)],
+        success_result=success,
+    )
+
+    states = await run_streaming_comparison(
+        prompt="p",
+        models=["gpt-5.5"],
+        temperatures=[0.0],
+        system_prompts=[None],
+        provider_factory=lambda _: provider,
+        live_display=False,
+        sleep=asyncio.sleep,  # a real 0.20s backoff
+    )
+
+    assert provider.attempt_count == 2
+    assert states[0].ttft_ms is not None
+    # Without the re-base this is >= 200 ms - the backoff, charged to TTFT.
+    assert states[0].ttft_ms < 100, states[0].ttft_ms
 
 
 async def test_rate_limit_respects_retry_after_header(fake_sleep: Any) -> None:
