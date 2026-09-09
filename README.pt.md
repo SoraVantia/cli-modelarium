@@ -49,8 +49,7 @@ cli-modelarium configure
 
 # Execute sua primeira comparação
 cli-modelarium "Explain quantum computing in one sentence" \
-  --models gpt-5.5,claude-opus-4-8,gemini-3.1-pro-preview \
-  --temperatures 0,0.7
+  --models gpt-5.5,claude-opus-4-8,gemini-3.1-pro-preview
 ```
 
 É isso. Você verá os três modelos transmitirem suas respostas ao vivo em paralelo, com latência, contagens de tokens e custo exibidos em uma tabela de comparação limpa.
@@ -87,7 +86,7 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ### 🧪 Recursos de avaliação
 
-- **Análise estatística de reprodutibilidade** - `--runs N` executa cada configuração N vezes e relata média/mediana/desvio padrão/CV de latência e tokens, frequência de saída, saída modal e diversidade de saída. Combine com `--check-hallucination` para medir a taxa de alucinação ao longo das execuções.
+- **Análise estatística de reprodutibilidade** - `--runs N` executa cada configuração N vezes e relata média/desvio padrão/CV de latência e tokens, frequência de saída, saída modal e diversidade de saída. Combine com `--check-hallucination` para medir a taxa de alucinação ao longo das execuções.
 - **Asserções determinísticas** - 10 tipos de asserção (`contains`, `regex`, `json_valid`, `json_schema`, `max_length_chars`, `latency_under`, `cost_under` e mais) com saída de aprovado/falhou e códigos de saída de CI
 - **Pontuação LLM-as-a-judge** - Use um LLM para pontuar as saídas de outros LLMs em critérios de qualidade
 - **Painéis de juízes** - Múltiplos juízes calculam a média das pontuações para avaliação menos enviesada
@@ -102,10 +101,10 @@ cli-modelarium "Explain quantum computing in one sentence" \
 ### 💾 Formatos de saída
 
 - **Terminal ao vivo** - Painéis baseados em Rich com barras de progresso e exibição de streaming
-- **CSV** - Amigável a planilhas (abra no Excel, Google Sheets, pandas)
+- **CSV** - Amigável a planilhas (abra no Excel, Google Sheets, pandas) **A linha de cabeçalho é o contrato; a posição da coluna não é.** Colunas são acrescentadas conforme a ferramenta cresce: leia pelo nome.
 - **JSON** - Estruturado para scripts e pipelines
 - **Markdown** - Tabelas bonitas para postagens de blog e relatórios
-- **Códigos de saída** - 0/1/2 refletindo status de aprovado/falhou para CI/CD
+- **Códigos de saída** - 0/1/2/3 refletindo status de aprovado/falhou para CI/CD
 
 ### 💰 Transparência de custos
 
@@ -113,7 +112,7 @@ cli-modelarium "Explain quantum computing in one sentence" \
 - Resumo de custo total por comparação
 - Custo do juiz mostrado separadamente quando LLM-as-judge está habilitado
 - Modelos locais exibidos como "Free"
-- Flag `--max-cost` para evitar contas surpresa
+- Flag `--max-cost` que para de disparar novas chamadas depois que o teto é ultrapassado (as chamadas já em andamento são concluídas, portanto ele limita uma execução em vez de evitar uma conta)
 
 ### 🔒 Segurança
 
@@ -243,15 +242,18 @@ O comando sai com código 1 se a taxa de aprovação cair abaixo de 90%, fazendo
 | Código | Significado |
 |--------|-------------|
 | `0` | Sucesso. |
-| `1` | Falha de asserção - uma ou mais asserções não passaram, ou uma execução do `batch` não verificou nada. Apenas o `batch` emite um veredicto de asserção; o `compare` ainda pode sair com `1` num erro inesperado. |
+| `1` | Falha de asserção - uma ou mais asserções não passaram, uma execução do `batch` não verificou nada, ou um modelo recusou e deixou asserções configuradas sem avaliação. Apenas o `batch` emite um veredicto de asserção; o `compare` ainda pode sair com `1` num erro inesperado. |
 | `2` | A execução não pôde ser concluída. |
+| `3` | `--max-cost` interrompeu a execução. As chamadas já iniciadas puderam terminar, portanto a saída salva contém o que foi medido e marca as que nunca foram iniciadas. O teto limita os envios seguintes, não o gasto já comprometido. |
+| `4` | `diff` encontrou uma diferença. Um código próprio porque todos os outros códigos diferentes de zero significam que algo deu errado, enquanto um `diff` que relata uma mudança teve êxito. Apenas `diff` o produz. |
 
 O código `2` abrange várias causas distintas e **não distingue entre elas**: uma chave de API ausente, um modelo desconhecido, um modelo descontinuado, um erro do provedor, um limite de custo excedido, um arquivo de lote malformado, uma combinação de flags rejeitada, um conflito no arquivo de saída ou um limite de tamanho de lote excedido.
 
-Vale conhecer duas regras antes de basear um pipeline nesses códigos:
+Vale conhecer três regras antes de basear um pipeline nesses códigos:
 
 - **Falhas de chamada prevalecem sobre asserções.** Se alguma chamada ao modelo falhar, `batch` sai com `2` sem informar o veredito das asserções, mesmo que estas também tenham falhado. Uma suíte vermelha e uma chave de API inválida parecem iguais pelo código de saída.
 - **Um servidor local inacessível não é uma falha.** `list-models --local` sai com `0` quando nenhum servidor responde, portanto o código de saída não serve para detectá-lo.
+- **Uma recusa reprova o gate, seja qual for a taxa de aprovação.** Uma requisição recusada não produz saída para asserir, então suas asserções são registradas como erro e excluídas da taxa - de modo que a taxa exibida acima descreve apenas as requisições que foram respondidas. O `batch` sai com `1` quando uma recusa deixou qualquer asserção configurada sem avaliação, mesmo a 100 %. O JSON informa quantas em `total_assertions_refused`.
 
 Para descobrir *por que* uma execução falhou, leia o campo `error` de cada resultado na saída JSON - ele traz a mensagem do provedor, com cadeias parecidas com credenciais redigidas:
 
@@ -265,9 +267,79 @@ if [ "$code" -eq 2 ]; then
 fi
 ```
 
+Uma recusa não é um erro - `error` continua `null` em uma requisição recusada, para que seu custo permaneça em todos os totais, e quem a reporta é o código de saída `1`, não o `2`. Por isso `select(.error)` não retorna nada na execução que uma recusa deixou vermelha. Para cobrir os dois casos:
+
+```bash
+jq -r '.results[] | select(.error or .refused)
+       | "\(.model): \(.error // "refused: " + (.stop_category // "no category"))"' results.json
+```
+
 `--output-format json` é obrigatório: a saída padrão não inclui nenhum campo de erro legível por máquina. Observe que as falhas que ocorrem *antes* de qualquer chamada ao modelo (chave ausente, modelo desconhecido, arquivo de lote incorreto) não produzem JSON algum; nesses casos a mensagem no console é o único sinal.
 
-**Nota de privacidade:** todos os formatos de saída - JSON, CSV e Markdown - incluem o prompt completo e a resposta completa do modelo de cada resultado, junto com quaisquer mensagens de erro do provedor. O JSON inclui ainda o texto de raciocínio de cada juiz; `--include-reasoning` controla apenas a exibição no console, não o arquivo, e CSV e Markdown não o contêm. Trate qualquer arquivo de saída como sensível antes de fazer commit ou enviá-lo como artefato público de CI. As condições de retenção de dados e de treinamento variam entre provedores, esta ferramenta não afirma nada a respeito de nenhuma delas, e convém verificar os termos de cada provedor que você configurar. O Claude Fable 5.1 exige retenção de 30 dias e não está disponível com retenção zero de dados.
+#### Identidade da execução
+
+Cada saída JSON carrega quatro campos de nível superior que dizem *qual execução* ela é. Antes desta versão isso não era possível: duas execuções do mesmo comando produziam um JSON que diferia em `latency_ms` e `ttft_ms` e em mais nada. Uma medição contra a 0.1.9 publicada registrou exatamente esse par, com 93 segundos de intervalo, e a segunda execução foi a mais rápida - de modo que até "latência maior executou antes" as teria ordenado ao contrário. A mtime do sistema de arquivos era o único sinal restante, e ela não sobrevive a `git add`, a uma cópia, a uma extração tar nem ao envio de um artefato.
+
+| Campo | O que é |
+|-------|---------|
+| `started_at` | Quando a execução começou - ISO 8601 UTC, precisão de segundos, sufixo `Z`. Capturado antes da resolução das opções e antes de qualquer chamada ao provedor, portanto é um horário de início e não de término. |
+| `run_id` | Um UUID que identifica esta execução. Sobrevive a cópias e renomeações, e separa duas execuções iniciadas no mesmo segundo. |
+| `experiment_key` | Dezesseis caracteres hexadecimais de um SHA-256 sobre as entradas que definem o experimento. Duas saídas que compartilham um estão medindo a mesma coisa. |
+| `invocation` | As opções resolvidas: nome do comando, lista de modelos, temperaturas, prompts de sistema e modelos juiz. |
+
+Os quatro vêm igualmente de `compare` e de `batch`, incondicionalmente. O Markdown carrega ainda `Started at` e `Run ID`; o CSV não carrega nenhum deles, já que a identidade é da execução e o CSV é da linha.
+
+```bash
+# Duas saídas são sequer comparáveis?
+[ "$(jq -r .experiment_key before.json)" = "$(jq -r .experiment_key after.json)" ] \
+  && echo "mesmo experimento" || echo "experimento diferente - não comparar"
+```
+
+`started_at` usa segundos e `Z` em vez de microssegundos e `+00:00` porque o `fromdateiso8601` do jq - a primeira coisa a que um monitor de shell recorre - rejeita as outras duas formas.
+
+**`invocation` registra o que foi executado, não o que você digitou.** Uma execução lançada com `--models all-flagship` lista os ids para os quais esse grupo se expandiu, que é o que um consumidor precisa: a composição de um grupo é estado do registro e muda entre versões, de modo que o nome sozinho não permitiria a ninguém reproduzir a execução.
+
+**Nada secreto pode chegar a `invocation`, e isso é uma lista de permissões e não uma passagem de censura.** O campo é construído a partir de quatro chaves nomeadas, então nada que não esteja nomeado ali consegue entrar. `--local-url` fica de fora porque pode carregar credenciais na posição de userinfo (`http://user:pass@host/v1`), uma forma em que não se pode confiar em nenhum comparador de padrões. Caminhos de arquivo ficam de fora porque um caminho revela um diretório pessoal e um nome de usuário, enquanto o conteúdo que importa é registrado de qualquer maneira. Construir o campo a partir de uma lista fixa é a garantia mais forte: uma passagem de censura teria de reconhecer todo segredo que lhe fosse mostrado, e esta não vê nenhum.
+
+**O que `experiment_key` resume:** o nome resolvido do comando, os prompts, a lista de modelos, as temperaturas, os prompts de sistema resolvidos, os modelos juiz e o número de execuções. Os valores medidos ficam de fora por construção - latência, custo e contagens de tokens são as saídas que estão sendo comparadas, e uma chave que se movesse com elas nunca coincidiria. O destino de saída também, já que `--output report.json` e `--output-format json` redirecionado para stdout são o mesmo experimento escrito duas vezes. As entradas estão documentadas aqui e junto à própria constante porque um hash de entradas desconhecidas é pior do que nenhum hash: duas chaves que diferem não dizem nada a um consumidor se ele não souber se mudou o experimento ou o modo de resumir. `EXPERIMENT_KEY_VERSION` existe pela mesma razão, e é incrementada quando as entradas do hash mudam - nunca por uma edição cosmética.
+
+**O número de execuções está na chave.** `--runs 1` e `--runs 10` sobre as mesmas células não compartilham uma, deliberadamente: a segunda responde a uma pergunta sobre variância que a primeira não pode responder, então um monitor que as juntasse estaria comparando uma estimativa pontual com uma distribuição.
+
+**A lista de modelos deliberadamente não é ordenada.** Ordená-la faria `--models a,b` e `--models b,a` compartilharem uma chave, o que se defende com o argumento de que as mesmas células são medidas - mas `prompt_id` em `compare` é um ordinal de linha posicional, então `p1` é um modelo diferente em cada uma dessas duas execuções. Um consumidor que as juntasse por `(experiment_key, prompt_id)` desalinharia todas as linhas enquanto ambas as chaves concordavam. Um falso "diferente" custa uma comparação pulada; um falso "igual" corrompe uma em silêncio. A lista de temperaturas mantém a ordem dada pela mesma razão.
+
+**Uma `experiment_key` idêntica não significa resultados idênticos.** Medido ao vivo em `gemini-3.8-flash`: duas invocações idênticas em tudo o que a chave consegue ver retornaram o mesmo texto de saída - `Paris` das duas vezes - com 65 e depois 58 tokens de saída, ao custo de `$0.00025125` e depois `$0.000225`. Ao longo das oito execuções que devolveram um resultado, `output_tokens` variou de 58 a 66 com uma entrada fixa de 10, porque os tokens internos de um modelo de raciocínio variam de chamada para chamada. Essas oito são a varredura inteira e não uma seleção dela: em 2026-09-06 houve catorze tentativas e seis devolveram 503, ficando como células mortas a zero tokens das quais não se pode tirar intervalo algum. Que o custo se mova entre duas execuções de um mesmo experimento é, portanto, normal, e não é evidência de que algo tenha mudado. Isso é um argumento *a favor* da chave e não contra ela: duas execuções que diferem no custo ainda podem ser reconhecidas como o mesmo experimento, que é o que se precisa antes de poder perguntar se a diferença significa alguma coisa.
+
+#### Comparar duas execuções
+
+`diff` lê duas saídas JSON que você já tem e informa o que se moveu. Não escreve nada, não armazena nada e não monitora nada.
+
+```bash
+cli-modelarium compare "capital of France?" --models gpt-5.5,claude-opus-4-8 --output before.json
+# ... mais tarde ...
+cli-modelarium compare "capital of France?" --models gpt-5.5,claude-opus-4-8 --output after.json
+
+cli-modelarium diff before.json after.json
+```
+
+<p align="center">
+  <img src="docs/assets/cli-modelarium-diff-demo-4model.gif" alt="Demonstração em terminal do cli-modelarium: a mesma comparação é executada duas vezes em claude-fable-5-1, gemini-3.8-flash, gemini-3.7-flash e claude-haiku-4-5, e então o diff relata o texto de cada resposta inalterado enquanto o custo se move nas duas linhas Gemini e permanece estável nas duas linhas Claude." width="1088">
+</p>
+
+**A ordem dos argumentos define a direção.** O primeiro arquivo é lido como a execução anterior, digam o que disserem os carimbos de tempo. Nada em uma saída consegue ordenar duas execuções escritas no mesmo segundo - `started_at` tem precisão de segundos e `run_id` é um UUID aleatório sem componente temporal -, então a regra sempre disponível é a que você digitou. Quando `started_at` contradiz, `diff` diz isso e segue em frente.
+
+São células que se comparam, não arquivos. Duas linhas podem compartilhar modelo, temperatura e prompt de sistema, porque `--temperatures 0,0` pede a mesma célula duas vezes; por isso a junção conta também a posição de cada linha dentro do seu próprio grupo de células. Células sem mudança ficam ocultas; `--all` as mostra.
+
+**Cada célula exibida informa, antes dos seus números, se o texto da resposta mudou.** Um modelo de raciocínio devolve rotineiramente o mesmo texto a um custo de tokens diferente, então "o custo se moveu e a resposta não" é a leitura comum - e uma resposta diferente com a mesma contagem de tokens não teria movido nada e ficaria oculta. É igual ou não igual, nunca uma pontuação de similaridade: uma porcentagem ali seria um número que a saída não contém. Se um lado recusou, falhou ou foi interrompido, não há resposta a comparar e o comando diz isso.
+
+**O que ele recusa:** um prompt alterado, um número de execuções alterado (uma execução é uma estimativa pontual e dez são uma distribuição) e uma saída de `batch` contra uma de `compare`. Um modelo adicionado ou removido não é uma recusa: as células em comum continuam comparáveis, e as que rodaram de um lado só são listadas à parte.
+
+**O que ele qualifica em vez de recusar:** duas saídas calculadas com tabelas de preços diferentes continuam comparáveis, mas parte da diferença de custo é a lista de preços e não os modelos, e isso é dito antes de qualquer valor de custo. Uma execução truncada, um modelo juiz diferente e uma saída anterior à 0.2.0 são sinalizados do mesmo modo. Uma saída antiga ainda assim é comparada, pareando o conteúdo das linhas, e `diff` nomeia as duas coisas que esse formato não lhe diz: qual comando escreveu a saída e quais juízes rodaram.
+
+Os veredictos de significância são impressos dos dois lados e nunca subtraídos. Um valor-p descreve uma amostra, então dois deles vindos de execuções independentes são ambos verdadeiros e a diferença entre eles não é uma grandeza que nenhum dos dois contém.
+
+`--output-format json` carrega todas as células, alteradas ou não, as seis métricas e todas as qualificações. O console mostra custo, latência e tokens de saída das células que se moveram. Os códigos de saída estão na tabela acima: nada se moveu é `0`, algo se moveu é `4`, e um par não comparável é `2`.
+
+**Nota de privacidade:** todos os formatos de saída - JSON, CSV e Markdown - incluem o prompt completo, o prompt de sistema completo e a resposta completa do modelo de cada resultado, junto com quaisquer mensagens de erro do provedor. O JSON inclui ainda o texto de raciocínio de cada juiz; `--include-reasoning` controla apenas a exibição no console, não o arquivo, e CSV e Markdown não o contêm. Trate qualquer arquivo de saída como sensível antes de fazer commit ou enviá-lo como artefato público de CI. As condições de retenção de dados e de treinamento variam entre provedores, esta ferramenta não afirma nada a respeito de nenhuma delas, e convém verificar os termos de cada provedor que você configurar. O Claude Fable 5.1 exige retenção de 30 dias e não está disponível com retenção zero de dados. Um modelo juiz é um segundo provedor: `--judge` envia a ele o seu prompt além da resposta do modelo, de modo que julgar amplia quem vê o prompt. Uma solicitação que o primeiro modelo recusa deixa de ser enviada a qualquer juiz. Um relatório do `compare` também registra o ambiente que o produziu - a versão da ferramenta, a versão exata do `scipy` instalada e a versão completa do Python - no bloco `methodology` de JSON e Markdown, com qualquer número de execuções. São metadados do host, não os seus dados, mas fixam com precisão a versão de uma dependência. O CSV não contém nada disso e o `batch` não registra nada disso.
 
 ## Configuração
 
@@ -318,24 +390,24 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 
 ## Provedores suportados
 
-| Provedor | Chaves de API Necessárias | Streaming | Rastreamento de Custos |
-|----------|-----------------|-----------|---------------|
-| OpenAI (GPT-5, GPT-5 mini, o3, o4-mini, etc.) | ✅ | ✅ | ✅ |
-| Anthropic (Claude Opus 4.8, Sonnet 4.6, Haiku 4.5, etc.) | ✅ | ✅ | ✅ |
-| Google (Gemini 3.5 Flash, Gemini 3.1 Pro, etc.) | ✅ | ✅ | ✅ |
-| xAI (Grok 4.3, etc.) | ✅ | ✅ | ✅ |
-| DeepSeek (V4 Pro, V4 Flash, etc.) | ✅ | ✅ | ✅ |
-| Mistral (Large, Medium, Small) | ✅ | ✅ | ✅ |
-| Groq (Llama 3.3, Llama 4 Scout, gpt-oss) | ✅ | ✅ | ✅ |
-| OpenRouter (8 IDs registrados: Qwen, DeepSeek R1, Llama 3.3, gpt-oss, GLM) | ✅ | ✅ | ✅ |
-| Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, etc.; modelos Qwen selecionados, Internacional/Singapura) | ✅ | ✅ | ✅ |
-| Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air, etc.; compatível com OpenAI, endpoint internacional) | ✅ | ✅ | ✅ |
-| NVIDIA NIM (9 IDs registrados: Nemotron, Gemma 4, Mistral Nemotron, MiniMax M3, Laguna, Llama 3.1) | ✅ | ✅ | Sem tarifa publicada |
-| Moonshot AI / Kimi (4 IDs registrados: K3, K2.7 Code, K2.7 Code HighSpeed, K2.6) | ✅ | ✅ | ✅ |
-| **Local: Ollama** | ❌ | ✅ | Gratuito |
-| **Local: LM Studio** | ❌ | ✅ | Gratuito |
-| **Local: vLLM** | ❌ | ✅ | Gratuito |
-| **Local: llama.cpp server** | ❌ | ✅ | Gratuito |
+| Provedor | Chaves de API Necessárias | Streaming | Rastreamento de Custos | Preços verificados |
+|----------|-----------------|-----------|---------------|------------------|
+| OpenAI (GPT-6 Astra, GPT-5.6 Sol, GPT-5.5, o3, etc.) | ✅ | ✅ | ✅ | `first-party` |
+| Anthropic (Claude Opus 5, Sonnet 5, Fable 5.1, Haiku 4.5, etc.) | ✅ | ✅ | ✅ | `first-party` |
+| Google (Gemini 3.8 Flash, 3.7 Flash, 3.1 Pro, etc.) | ✅ | ✅ | ✅ | `first-party` |
+| xAI (Grok 4.6, Grok 4.3, etc.) | ✅ | ✅ | ✅ | `first-party` |
+| DeepSeek (V4 Pro, V4 Flash, etc.) | ✅ | ✅ | ✅ | `first-party` |
+| Mistral (Medium, Large, Small, Codestral) | ✅ | ✅ | ✅ | `first-party` |
+| Groq (Llama 3.3, Llama 4 Scout, gpt-oss) | ✅ | ✅ | ✅ | `third-party` |
+| OpenRouter (8 IDs registrados: Qwen, DeepSeek R1, Llama 3.3, gpt-oss, GLM) | ✅ | ✅ | ✅ | `unchecked` |
+| Alibaba/DashScope (Qwen3.8 Max, Qwen3.7 Max, Qwen3 Coder, etc.; modelos Qwen selecionados, Internacional/Singapura) | ✅ | ✅ | ✅ | `first-party` |
+| Z.AI/GLM (GLM-5.3, GLM-5.2, GLM-4.7, etc.; compatível com OpenAI, endpoint internacional) | ✅ | ✅ | ✅ | `first-party` |
+| NVIDIA NIM (9 IDs registrados: Nemotron, Gemma 4, Mistral Nemotron, MiniMax M3, Laguna, Llama 3.1) | ✅ | ✅ | Sem tarifa publicada | `unpublished` |
+| Moonshot AI / Kimi (4 IDs registrados: K3, K2.7 Code, K2.7 Code HighSpeed, K2.6) | ✅ | ✅ | ✅ | `reseller` |
+| **Local: Ollama** | ❌ | ✅ | Gratuito | — |
+| **Local: LM Studio** | ❌ | ✅ | Gratuito | — |
+| **Local: vLLM** | ❌ | ✅ | Gratuito | — |
+| **Local: llama.cpp server** | ❌ | ✅ | Gratuito | — |
 
 Execute `cli-modelarium list-models` para ver todos os modelos atualmente suportados.
 
@@ -349,7 +421,7 @@ Em vez de listar IDs de modelos, `--models` aceita um atalho de grupo. Os grupos
 |-------|---------|
 | `all-premium` / `all-flagship` | gpt-5.6-sol, claude-opus-5, gemini-3.1-pro-preview, grok-4.6, deepseek-v4-pro, mistral-large-latest, qwen3.8-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
-| `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
+| `all-reasoning` | o3, o4-mini, deepseek-v4-pro, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
 | `all-open-weight` | openai/gpt-oss-120b, openai/gpt-oss-safeguard-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
 
@@ -368,7 +440,7 @@ cli-modelarium "Explique o teorema CAP" --models all-local
 
 Cli Modelarium usa uma camada de abstração de provedor modular que oculta as diferenças de API entre o array `messages` do OpenAI, o parâmetro `system` de nível superior do Anthropic, o `system_instruction` do Google e outros. Cada provedor implementa a mesma interface de streaming assíncrono, então a CLI pode executá-los todos em paralelo com `asyncio.gather()`.
 
-Os cálculos de custo vêm do campo `usage` reportado por cada provedor (tokens de entrada, tokens de saída, tokens em cache) multiplicado pelas constantes de preço atuais. Os dados de preço foram verificados a partir da documentação oficial do provedor em **29 de julho de 2026** - veja [Notas e Limitações](#notas-e-limitações) para ressalvas.
+Os cálculos de custo vêm do campo `usage` reportado por cada provedor (tokens de entrada, tokens de saída, tokens em cache) multiplicado pelas constantes de preço atuais. A maior parte dos dados de preço foi verificada a partir da documentação oficial do provedor em **6 de setembro de 2026**; quatro provedores não foram totalmente cobertos - veja [Notas e Limitações](#notas-e-limitações).
 
 Para modelos locais, o mesmo SDK Python da OpenAI é usado com uma `base_url` personalizada, já que Ollama, LM Studio, vLLM e llama.cpp expõem endpoints REST compatíveis com OpenAI.
 
@@ -376,9 +448,9 @@ Para modelos locais, o mesmo SDK Python da OpenAI é usado com uma `base_url` pe
 
 ### Dados de preço
 
-A maior parte dos preços incorporados ao Cli Modelarium foi verificada a partir da documentação oficial do provedor em **29 de julho de 2026**. Algumas entradas carregam sua própria data de verificação, anotada ao lado de cada uma no registro; os preços da Z.AI/GLM são os mais antigos, de **22 de junho de 2026**. Os preços de LLM mudam com frequência (às vezes mensalmente). A data `pricing_as_of` é incluída na saída JSON e exibida no console; a saída CSV e Markdown não a inclui. Sempre verifique com a página oficial de preços de cada provedor antes de confiar em cálculos de custo para orçamento ou decisões de produção.
+A maior parte dos preços incorporados ao Cli Modelarium foi verificada a partir da documentação oficial do provedor em **6 de setembro de 2026**. Algumas entradas carregam sua própria data de verificação, anotada ao lado de cada uma no registro. Groq, Moonshot, NVIDIA e OpenRouter não foram totalmente verificados nessa passagem e estão marcados como não verificados no registro. Dois conjuntos de tarifas expiram: `gemini-3.6-flash`, `gemini-3.7-flash` e `gemini-3.8-flash` estão em tarifas introdutórias que dobram em 1 de janeiro de 2027, e `gpt-5.6-sol` está em uma tarifa promocional que termina por volta de 21 de novembro de 2026. Ambas fazem uma comparação executada hoje parecer mais barata do que a mesma execução será depois, e ambas mudam de forma uniforme, então nada na saída se destaca como estranho. Os preços de LLM mudam com frequência (às vezes mensalmente). A data `pricing_as_of` é incluída nas saídas JSON e Markdown e exibida no console; a saída CSV não a inclui. Sempre verifique com a página oficial de preços de cada provedor antes de confiar em cálculos de custo para orçamento ou decisões de produção.
 
-Os preços são a tarifa pública padrão/de tabela de cada provedor por 1M de tokens (não preços em lote, prioritários, fora de pico ou promocionais); para modelos com tiers baseados no tamanho da entrada, é exibido o tier inicial/de contexto curto, e o preço em cache é a tarifa de leitura de cache. Os custos do DashScope/Qwen refletem as tarifas sem raciocínio (a ferramenta envia `enable_thinking=false`).
+Os preços são a tarifa pública padrão/de tabela de cada provedor por 1M de tokens (não preços em lote, prioritários, fora de pico ou promocionais, com uma exceção anotada: `gpt-5.6-sol`, cuja tarifa publicada atual é promocional); para modelos com tiers baseados no tamanho da entrada, é exibido o tier inicial/de contexto curto, e o preço em cache é a tarifa de leitura de cache. Os custos do DashScope/Qwen refletem as tarifas sem raciocínio (a ferramenta envia `enable_thinking=false`).
 
 A NVIDIA NIM é a exceção. A NVIDIA não publica nenhuma tarifa por token para seus endpoints NIM hospedados, portanto o custo não é rastreado para os modelos da NVIDIA: o zero exibido na coluna de custo é a ausência de uma tarifa, não um preço igual a zero. Como esse custo é sempre zero, `--max-cost` nunca será acionado em um modelo da NVIDIA e uma asserção `cost_under` sempre será aprovada - nenhum dos dois oferece qualquer proteção de gastos neste provedor. O acesso é medido em créditos da conta em vez de faturado por token, portanto o que se deve observar é o esgotamento dos créditos, não uma fatura inesperada. Um painel de advertência é exibido sempre que um modelo da NVIDIA faz parte de uma execução.
 
@@ -417,13 +489,14 @@ O preset de detecção de alucinações é um sinal de comparação útil entre 
 LLMs são não determinísticos em temperatura > 0 - executar novamente o mesmo prompt pode produzir saídas diferentes. Uma única execução de comparação mostra UMA amostra de cada modelo, não um veredicto de qualidade definitivo.
 
 Para tirar conclusões mais confiáveis:
-- Use `--runs 5` (ou mais) para executar automaticamente cada comparação N vezes e ver resumos estatísticos: latência média/mediana, coeficiente de variação, saída modal e diversidade de saída. Um coeficiente de variação abaixo de 0,05 indica comportamento estável do modelo entre as execuções.
+- Use `--runs 5` (ou mais) para executar automaticamente cada comparação N vezes e ver resumos estatísticos: latência média, coeficiente de variação, saída modal e diversidade de saída. Um coeficiente de variação abaixo de 0,05 indica comportamento estável do modelo entre as execuções.
 - Para a análise de consistência de alucinações, combine `--runs` com `--check-hallucination` para ver com que frequência o modelo produz alucinações ao longo de várias execuções (a taxa de alucinação).
-- Use `--temperatures 0` para saídas mais determinísticas. Alguns modelos não aceitam nenhuma configuração de temperatura - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `claude-fable-5-1`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.7-code-highspeed` e `kimi-k2.6`. A ferramenta omite o campo para esses modelos para que a chamada ainda funcione, e eles são executados com o valor padrão do provedor.
+- Use `--temperatures 0` para saídas mais determinísticas. Alguns modelos não aceitam nenhuma configuração de temperatura - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `claude-fable-5-1`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, `gemini-3.8-flash`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.7-code-highspeed` e `kimi-k2.6`. A ferramenta omite o campo para esses modelos para que a chamada ainda funcione, e eles são executados com o valor padrão do provedor.
+- Use `--system-prompts "Seja breve.,Seja detalhado."` para executar o mesmo prompt sob vários prompts de sistema e compará-los lado a lado. Multiplica a contagem de chamadas como `--models` e `--temperatures`. Quando há mais de um, os relatórios rotulam cada linha como `SP 1`, `SP 2` e assim por diante e imprimem uma legenda com o texto completo: `SP 2` no resumo por célula é o mesmo prompt que `SP 2` na tabela acima. CSV e JSON levam o prompt de sistema completo em cada linha.
 - Compare entre múltiplos prompts, não apenas um
-- Use a flag `--output json` para salvar execuções para análise sistemática (com `--runs > 1` o JSON inclui agregados `stats_by_cell` por célula)
+- Use a flag `--output-format json` para salvar execuções para análise sistemática (com `--runs > 1` o JSON inclui agregados `stats_by_cell` por célula)
 
-Esses doze modelos são chamados sem o campo de temperatura, e `models_without_temperature` na saída JSON nomeia os afetados em cada execução. Vale conhecer três consequências. Uma varredura `--temperatures` com vários valores emite requisições idênticas em vez de uma varredura real contra esses modelos, e a ferramenta exibe um aviso quando isso acontece. A temperatura mostrada na tabela de resultados, no CSV e em cada registro de resultado JSON é o valor **solicitado**, não o aplicado. E `--significance` é onde isso pode mudar uma conclusão em vez de um rótulo: comparar um modelo que omite a temperatura com outro que a respeita produz uma diferença de variância que é um artefato de amostragem, e Welch ou Mann-Whitney a reportarão como se fosse uma diferença de qualidade entre modelos. Esse caso é avisado: qualquer execução de significância que misture um modelo afetado com um não afetado imprime um painel `Temperature not applied` nomeando os modelos que rodaram na temperatura padrão do provedor, e define `significance_temperature_mixed` como `true` na saída JSON. Uma execução com várias temperaturas que também seja mista recebe as duas mensagens em um único painel. O CSV não carrega um sinal equivalente.
+Esses dezenove modelos são chamados sem o campo de temperatura, e `models_without_temperature` na saída JSON nomeia os afetados em cada execução. Vale conhecer três consequências. Uma varredura `--temperatures` com vários valores emite requisições idênticas em vez de uma varredura real contra esses modelos, e a ferramenta exibe um aviso quando isso acontece. A temperatura mostrada na tabela de resultados, no CSV e em cada registro de resultado JSON é o valor **solicitado**, não o aplicado. E `--significance` é onde isso pode mudar uma conclusão em vez de um rótulo: comparar um modelo que omite a temperatura com outro que a respeita produz uma diferença de variância que é um artefato de amostragem, e Welch ou Mann-Whitney a reportarão como se fosse uma diferença de qualidade entre modelos. Esse caso é avisado: qualquer execução de significância que misture um modelo afetado com um não afetado imprime um painel `Temperature not applied` nomeando os modelos que rodaram na temperatura padrão do provedor, e define `significance_temperature_mixed` como `true` na saída JSON. Uma execução com várias temperaturas que também seja mista recebe as duas mensagens em um único painel. O CSV não carrega um sinal equivalente.
 
 ## Sobre o projeto
 
