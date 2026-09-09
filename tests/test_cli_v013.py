@@ -262,7 +262,7 @@ class TestCIAutoEnable:
         # stats_by_cell should include CI fields when CIs are auto-enabled.
         assert "stats_by_cell" in data
         any_ci_present = any(
-            "latency_mean_ms_ci_low" in cell for cell in data["stats_by_cell"]
+            "latency_ms_ci_low" in cell for cell in data["stats_by_cell"]
         )
         assert any_ci_present
 
@@ -294,8 +294,8 @@ class TestCIAutoEnable:
         assert result.exit_code == 0, result.output
         data = json.loads(out_file.read_text())
         for cell in data["stats_by_cell"]:
-            assert "latency_mean_ms_ci_low" not in cell
-            assert "latency_mean_ms_ci_high" not in cell
+            assert "latency_ms_ci_low" not in cell
+            assert "latency_ms_ci_high" not in cell
 
     def test_runs_eq_1_no_cis(
         self,
@@ -373,8 +373,8 @@ class TestReproducibility:
 
         d1 = json.loads(out1.read_text())
         d2 = json.loads(out2.read_text())
-        cis1 = [cell.get("latency_mean_ms_ci_low") for cell in d1["stats_by_cell"]]
-        cis2 = [cell.get("latency_mean_ms_ci_low") for cell in d2["stats_by_cell"]]
+        cis1 = [cell.get("latency_ms_ci_low") for cell in d1["stats_by_cell"]]
+        cis2 = [cell.get("latency_ms_ci_low") for cell in d2["stats_by_cell"]]
         assert cis1 == cis2
 
     def test_methodology_block_records_seed(
