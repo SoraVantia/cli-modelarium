@@ -34,8 +34,6 @@ MODEL_GROUPS: dict[str, list[str]] = {
         "o3",
         "o4-mini",
         "deepseek-v4-pro",
-        "magistral-medium-latest",
-        "magistral-small-latest",
         "glm-5.2",
     ],
     "all-cheap": [
