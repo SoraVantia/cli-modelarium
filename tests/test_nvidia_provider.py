@@ -236,7 +236,7 @@ def test_both_caveats_render_neither_suppressed(captured_console: io.StringIO) -
     cli_module._warn_unpriced_models(models)
     raw = captured_console.getvalue()
     out = flatten_rendered(raw)
-    assert "identical rather than a sweep" in out
+    assert "not a sweep" in out
     assert "not sampled under identical" in out
     assert "Cost is not tracked" in out
     assert count_panels(raw) == 2
