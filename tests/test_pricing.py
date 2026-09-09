@@ -25,7 +25,7 @@ from cli_modelarium.pricing import (
 
 class TestPricingAsOf:
     def test_constant_format(self) -> None:
-        assert PRICING_AS_OF == "2026-07-29"
+        assert PRICING_AS_OF == "2026-09-06"
 
     def test_freshness_note_includes_date(self) -> None:
         assert PRICING_AS_OF in pricing_freshness_note()
