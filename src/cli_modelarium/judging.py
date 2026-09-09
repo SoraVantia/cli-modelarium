@@ -31,7 +31,7 @@ from cli_modelarium.models_registry import get_provider_for_model
 from cli_modelarium.pricing import rejects_sampling_params
 from cli_modelarium.providers.base import BaseProvider
 from cli_modelarium.security import redact_secrets
-from cli_modelarium.streaming import StreamState
+from cli_modelarium.streaming import DEFAULT_CONCURRENCY, CostLedger, StreamState
 
 # Default rubric. Changing these changes what every unscored run measures,
 # so scores are only comparable across runs that used the same criteria.
@@ -386,7 +386,8 @@ async def run_judging(
     template: str = JUDGE_PROMPT_TEMPLATE,
     response_parser: Callable[[str], dict] | None = None,
     skip_self_eval: bool = True,
-    concurrency: int = 5,
+    concurrency: int = DEFAULT_CONCURRENCY,
+    ledger: CostLedger | None = None,
 ) -> list[JudgeResult]:
     """Run every (state, judge) pairing in parallel and aggregate.
 
@@ -425,7 +426,21 @@ async def run_judging(
         response_text: str,
     ) -> JudgeScore:
         async with semaphore:
-            return await score_with_judge(
+            # Judge spend counts toward the SAME ceiling. This is a second
+            # gather with its own semaphores, running after the main pass, and
+            # its cost lands on JudgeScore rather than on a StreamState - so a
+            # ledger kept on the state would count none of it.
+            if ledger is not None and ledger.exhausted:
+                ledger.skip()
+                return JudgeScore(
+                    model=judge_model,
+                    score=None,
+                    reasoning="",
+                    cost_usd=0.0,
+                    latency_ms=0.0,
+                    parse_error="skipped: cost ceiling reached",
+                )
+            score = await score_with_judge(
                 provider,
                 judge_model,
                 original_prompt,
@@ -434,10 +449,26 @@ async def run_judging(
                 template,
                 response_parser=response_parser,
             )
+            if ledger is not None:
+                ledger.add(score.cost_usd)
+            return score
 
     async def _score_state(state: StreamState, original_prompt: str) -> JudgeResult:
-        if state.error:
-            # Don't judge a failed main call. Empty JudgeResult.
+        if state.error or state.refused:
+            # Don't judge a call that produced no answer. Empty JudgeResult.
+            #
+            # A decline is a third terminal status beside complete and error
+            # (see StreamState.refused), so it needs saying separately: guarding
+            # on `error` alone sent declined rows to the judge with an empty
+            # string as the response to evaluate, and the judge scored it.
+            #
+            # `original_prompt` below is the USER'S PROMPT, forwarded to the
+            # judge provider alongside the response. Judging a declined row
+            # therefore sent the request to a second provider in the one case
+            # where the first had already decided not to process it.
+            #
+            # `_run_mode_only_judging` in cli.py has always excluded declined
+            # rows when picking a cell representative, for the same reason.
             return JudgeResult()
 
         tasks = []
