@@ -22,7 +22,8 @@ Only the latest released version receives security updates.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
+| 0.2.x   | :white_check_mark: |
+| < 0.2   | :x:                |
 
 ## Security Model
 
@@ -33,8 +34,9 @@ Cli Modelarium is built with these protections in mind:
   written to disk in plaintext by the tool.
 - **Secrets are redacted** from displayed output and from the `error` field of
   saved reports. Redaction matches recognisable key prefixes - `sk-proj-`,
-  `sk-ant-`, `sk-or-`, `sk-`, `xai-`, `gsk_`, `nvapi-` and `AIza` - along with
-  fully-formed `Authorization: Bearer`, `x-api-key:` and `api_key=` forms.
+  `sk-ant-`, `sk-or-`, `sk-`, `xai-`, `gsk_`, `nvapi-`, `AIza` and `AQ.Ab` -
+  along with fully-formed `Authorization: Bearer`, `x-api-key:`,
+  `x-goog-api-key:`, `api_key=` and `?key=` forms.
   Mistral and Z.AI keys carry no prefix: their shapes are bare alphanumeric
   strings that cannot be told apart from model ids, request ids, hashes and
   base64 fragments, so no pattern can match them without redacting ordinary
