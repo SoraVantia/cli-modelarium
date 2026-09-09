@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cli-modelarium"
-version = "0.1.9"
+version = "0.2.0"
 description = "Compare LLM outputs side by side from the terminal, with statistical significance testing, cost tracking and CI assertions. Twelve cloud providers plus local models."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -75,7 +75,7 @@ Issues = "https://github.com/SoraVantia/cli-modelarium/issues"
 Changelog = "https://github.com/SoraVantia/cli-modelarium/blob/main/CHANGELOG.md"
 
 [project.scripts]
-cli-modelarium = "cli_modelarium.cli:main"
+cli-modelarium = "cli_modelarium.cli:run"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cli_modelarium"]
