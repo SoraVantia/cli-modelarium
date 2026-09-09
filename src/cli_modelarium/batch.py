@@ -40,6 +40,7 @@ from cli_modelarium.pricing import calculate_cost, is_local_model
 from cli_modelarium.providers.base import BaseProvider
 from cli_modelarium.streaming import (
     DEFAULT_MAX_RETRIES,
+    CostLedger,
     StreamState,
     _call_with_retry,
 )
@@ -53,9 +54,14 @@ from cli_modelarium.streaming import (
 MAX_PROMPTS_PER_BATCH = 1000
 MAX_TOTAL_CALLS = 10_000
 
-# Cost estimation defaults. Assumed input/output tokens per call when we
-# don't know the real shape yet. Deliberately on the high side - we'd rather
-# refuse a borderline run than burn through somebody's quota.
+# Cost estimation defaults. Assumed input/output tokens per call when we don't
+# know the real shape yet. These are a guess, not a conservative one: 500 output
+# tokens is roughly a seventh of the 4096-token cap the Anthropic provider sends
+# on every call, and the input figure ignores the prompt's real length. The
+# pre-flight estimate built from them therefore runs well UNDER what a run
+# actually costs, and cannot be relied on to refuse a borderline run. Raising
+# them would refuse cheap runs on a guess; the run-time ledger is what stops an
+# expensive one.
 ESTIMATE_INPUT_TOKENS = 500
 ESTIMATE_OUTPUT_TOKENS = 500
 
@@ -216,9 +222,13 @@ def estimate_batch_cost(
     temperatures: list[float],
     command_system_prompts: list[str | None],
 ) -> float:
-    """Return an upper-bound USD cost estimate for the batch.
+    """Return a rough USD cost estimate for the batch. NOT an upper bound.
 
-    Assumes `ESTIMATE_INPUT_TOKENS` + `ESTIMATE_OUTPUT_TOKENS` per call.
+    Prices every call at a flat `ESTIMATE_INPUT_TOKENS` + `ESTIMATE_OUTPUT_TOKENS`
+    regardless of the real prompt, so a batch can cost several times this figure -
+    see `estimate_compare_cost` for the measured gap. What actually stops a run
+    that overruns is the `CostLedger`, which accumulates measured cost as it goes.
+
     Unknown models are treated as $0 (we silently skip them in the estimate
     rather than failing - the actual run will fail more loudly when it
     reaches that model).
@@ -248,14 +258,23 @@ def estimate_compare_cost(
     temperatures: list[float],
     system_prompts: list[str | None],
 ) -> float:
-    """Upper-bound USD cost estimate for a compare run.
+    """Rough USD cost estimate for a compare run. NOT an upper bound.
 
     Compare runs 1 prompt x M models x T temperatures x S system_prompts.
-    Uses ESTIMATE_INPUT_TOKENS and ESTIMATE_OUTPUT_TOKENS as the per-call
-    upper bound. Local models contribute $0. Unknown models are silently
-    skipped (real call will fail at runtime if model truly invalid).
+    Every call is priced at a flat ESTIMATE_INPUT_TOKENS / ESTIMATE_OUTPUT_TOKENS
+    regardless of the real prompt, so the figure is a fixed-shape guess and a run
+    can cost many times it. The output assumption alone sits about 7x under what
+    one call can bill at the 4096-token cap the Anthropic provider sends, the
+    input side ignores the prompt's actual length, and judge cost is excluded
+    entirely (judge output length is unknown until the run). Measured: a run
+    estimated at $0.009 spent $0.924.
 
-    Does NOT include judge cost (judge output length unknown until run).
+    Treat it as a sanity check on the shape of a run, not as a bound on its cost.
+    The enforcement that actually stops a run is the ledger in `CostLedger`,
+    which accumulates each cell's measured cost as the run proceeds.
+
+    Local models contribute $0. Unknown models are silently skipped (a real call
+    will fail at runtime if the model is truly invalid).
     """
     total = 0.0
     for _sp in system_prompts:
@@ -337,6 +356,7 @@ async def run_batch(
     concurrency: int,
     max_retries: int = DEFAULT_MAX_RETRIES,
     show_progress: bool = True,
+    ledger: CostLedger | None = None,
     sleep: Callable[[float], asyncio.Future[None]] = asyncio.sleep,
 ) -> list[tuple[StreamState, BatchPrompt]]:
     """Run every (state, prompt) pair in parallel under per-provider semaphores.
@@ -372,6 +392,14 @@ async def run_batch(
     async def _run_one(state: StreamState, bp: BatchPrompt) -> None:
         provider = instances[state.provider_name]
         async with semaphores[state.provider_name]:
+            # Last moment before dispatch - see CostLedger. A cell past this
+            # point is finished, never abandoned, so its cost stays known.
+            if ledger is not None and ledger.exhausted:
+                ledger.skip()
+                state.mark_cancelled()
+                if progress is not None and task_id is not None:
+                    progress.advance(task_id)
+                return
             state.mark_started()
             try:
                 result = await _call_with_retry(
@@ -382,6 +410,8 @@ async def run_batch(
                     sleep=sleep,
                 )
                 state.mark_complete(result)
+                if ledger is not None:
+                    ledger.add(result.cost_usd)
             except ModelariumError as e:
                 state.mark_error(str(e))
             except Exception as e:  # noqa: BLE001 - become an error row, not a crash
