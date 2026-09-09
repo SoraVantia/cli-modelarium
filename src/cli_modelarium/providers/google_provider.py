@@ -22,9 +22,11 @@ from google.genai import errors as genai_errors
 from cli_modelarium.exceptions import (
     AuthenticationError,
     ProviderError,
+    ProviderOverloadedError,
     RateLimitError,
 )
 from cli_modelarium.pricing import calculate_cost
+from cli_modelarium.providers._utils import TRANSIENT_STATUS_CODES
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
 from cli_modelarium.security import redact_secrets
 
@@ -171,4 +173,9 @@ class GoogleProvider(BaseProvider):
             raise AuthenticationError(message, provider=self.name) from None
         if code == 429:
             raise RateLimitError(message, provider=self.name, retry_after=None) from None
+        # 503 UNAVAILABLE ("model is currently experiencing high demand") is the
+        # one Gemini actually returns under load - measured on 6 of 14 live
+        # attempts to gemini-3.8-flash on 2026-09-06.
+        if code in TRANSIENT_STATUS_CODES:
+            raise ProviderOverloadedError(message, provider=self.name) from None
         raise ProviderError(message, provider=self.name) from None
