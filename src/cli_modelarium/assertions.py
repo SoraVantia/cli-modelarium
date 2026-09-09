@@ -82,6 +82,9 @@ class AssertionResult:
     exception is a run where they are ALL that happened: with no definitive
     result anywhere there is no verdict to report, so the build fails rather
     than claiming a pass rate over an empty denominator.
+
+    `error_kind` splits that one state into the two causes it was carrying,
+    because they behave differently under a gate. See the field.
     """
 
     type: str
@@ -90,6 +93,28 @@ class AssertionResult:
     actual: Any
     message: str
     error: str | None = None
+    # WHY the assertion could not run. Set whenever `error` is.
+    #
+    #   "environment" - the local install or the config is at fault (a missing
+    #                   jsonschema, a bad regex, an unknown type). The SAME
+    #                   assertion errors identically for every model, so it
+    #                   cannot create a differential between them and no other
+    #                   model's passes can hide it. Excluding it from the ratio
+    #                   is the shipped optional-dependency guarantee.
+    #   "refused"     - this model declined. That errors on ONE model and ONE
+    #                   prompt, which is exactly the differential another
+    #                   model's passes absorb - so excluding it from the ratio
+    #                   let a refusal launder itself through a model that
+    #                   answered.
+    #
+    # It is a TAG, not a message. `error` is a display string, rendered to the
+    # user by `format_assertion_message` below, so matching on its text would
+    # make an exit code depend on wording: enriching the refusal message with
+    # the provider's stop_category - the obvious next edit, after 0.1.9 put it
+    # on four other surfaces - would silently stop the gate firing, with the
+    # whole suite still green. Changing this tag is visibly a change to a
+    # matcher; changing a sentence is not.
+    error_kind: str | None = None
 
 
 # ===== config parsing =====
@@ -101,8 +126,13 @@ def refused_results(assertions: list[dict[str, Any]]) -> list[AssertionResult]:
     A refused cell has no output to assert against, so no assertion is a
     verdict about it. `error` is exactly the existing state for that - it
     means "couldn't run, so not a verdict either way" and is excluded from
-    both halves of the pass ratio - which is why nothing downstream needs a
-    new concept.
+    both halves of the pass ratio.
+
+    Excluding it is right for the RATIO and wrong for the GATE, which is why
+    these carry `error_kind="refused"`. Left indistinguishable from an
+    environment error, a refusal removed itself from the denominator and one
+    definitive assertion anywhere else in the batch was enough to report a
+    100% pass rate over what remained.
 
     This matters because four of the ten types PASS against an empty string:
     `not_contains` finds nothing, `max_length_chars` sees zero characters,
@@ -123,6 +153,7 @@ def refused_results(assertions: list[dict[str, Any]]) -> list[AssertionResult]:
                 actual=None,
                 message="not evaluated: the model refused",
                 error="model refused; no output to assert against",
+                error_kind="refused",
             )
         )
     return out
@@ -192,6 +223,7 @@ def run_assertions(
                     actual=None,
                     message="invalid assertion config",
                     error=str(e),
+                    error_kind="environment",
                 )
             )
             continue
@@ -206,6 +238,7 @@ def run_assertions(
                 actual=None,
                 message="assertion check raised unexpectedly",
                 error=f"{type(e).__name__}: {e}",
+                error_kind="environment",
             )
         results.append(result)
     return results
@@ -227,6 +260,7 @@ def _dispatch(
             actual=None,
             message="unknown assertion type",
             error=f"no checker registered for type: {config.type}",
+            error_kind="environment",
         )
     return checker(config, output, latency_ms, cost_usd)
 
@@ -264,6 +298,14 @@ def count_errored(results: list[AssertionResult]) -> int:
     return sum(1 for r in results if r.error is not None)
 
 
+def count_refused(results: list[AssertionResult]) -> int:
+    """Errored assertions whose cause was a refusal rather than the environment.
+
+    Matched on the tag, never on the message - see `AssertionResult.error_kind`.
+    """
+    return sum(1 for r in results if r.error_kind == "refused")
+
+
 @dataclass(frozen=True)
 class AssertionTotals:
     """Assertion outcomes rolled up across a whole batch.
@@ -282,12 +324,20 @@ class AssertionTotals:
 
     Both mean "nothing was verified"; only the first means "something is
     broken". `configured` is the discriminator.
+
+    `refused` is the subset of `errored` that a model declined. It is reported
+    beside the ratio rather than folded into it: the ratio still describes the
+    requests that were answered, which is what it has always meant, and the
+    count says how much it does not cover.
     """
 
     passed: int
     definitive: int
     failed: int
     errored: int
+    # The subset of `errored` a model declined rather than the environment
+    # broke. Defaulted so a caller predating the field still constructs.
+    refused: int = 0
 
     @property
     def pass_rate(self) -> float | None:
@@ -315,7 +365,7 @@ def count_assertion_totals(
     `None` entries mean "this state ran no assertions" and are skipped, which
     matches how both `batch` and the formatters store them.
     """
-    passed = definitive = failed = errored = 0
+    passed = definitive = failed = errored = refused = 0
     for results in per_state:
         if results is None:
             continue
@@ -324,8 +374,13 @@ def count_assertion_totals(
         definitive += d
         failed += count_failed(results)
         errored += count_errored(results)
+        refused += count_refused(results)
     return AssertionTotals(
-        passed=passed, definitive=definitive, failed=failed, errored=errored
+        passed=passed,
+        definitive=definitive,
+        failed=failed,
+        errored=errored,
+        refused=refused,
     )
 
 
@@ -417,6 +472,7 @@ def _check_regex(
             actual=None,
             message="invalid regex pattern",
             error=f"re.error: {e}",
+            error_kind="environment",
         )
     match = compiled.search(output)
     return AssertionResult(
@@ -493,6 +549,7 @@ def _check_json_schema(
             actual=None,
             message="jsonschema not installed",
             error="jsonschema not installed. Run: pip install cli-modelarium[schema]",
+            error_kind="environment",
         )
 
     text = _strip_code_fence(output) if output else ""
@@ -524,6 +581,7 @@ def _check_json_schema(
             actual=data,
             message="schema must be an object",
             error=f"schema value must be a JSON object, got {type(schema).__name__}",
+            error_kind="environment",
         )
 
     try:
@@ -546,6 +604,7 @@ def _check_json_schema(
             actual=data,
             message="schema is malformed",
             error=f"jsonschema schema error: {e.message}",
+            error_kind="environment",
         )
     except Exception as e:  # noqa: BLE001 - any other jsonschema quirk
         return AssertionResult(
@@ -555,6 +614,7 @@ def _check_json_schema(
             actual=data,
             message="jsonschema raised unexpectedly",
             error=f"{type(e).__name__}: {e}",
+            error_kind="environment",
         )
 
     return AssertionResult(
@@ -579,6 +639,7 @@ def _check_min_length_chars(
             actual=None,
             message="min_length_chars value must be an integer",
             error=f"value must be a number, got {config.value!r}",
+            error_kind="environment",
         )
     actual = len(output)
     passed = actual >= limit
@@ -608,6 +669,7 @@ def _check_max_length_chars(
             actual=None,
             message="max_length_chars value must be an integer",
             error=f"value must be a number, got {config.value!r}",
+            error_kind="environment",
         )
     actual = len(output)
     passed = actual <= limit
@@ -635,6 +697,7 @@ def _check_latency_under(
             actual=None,
             message="latency_under value must be a number",
             error=f"value must be a number, got {config.value!r}",
+            error_kind="environment",
         )
     if latency_ms is None:
         return AssertionResult(
@@ -644,6 +707,7 @@ def _check_latency_under(
             actual=None,
             message="latency unavailable",
             error="latency was not measured for this call",
+            error_kind="environment",
         )
     passed = latency_ms < limit
     return AssertionResult(
@@ -672,6 +736,7 @@ def _check_cost_under(
             actual=None,
             message="cost_under value must be a number",
             error=f"value must be a number, got {config.value!r}",
+            error_kind="environment",
         )
     passed = cost_usd < limit
     return AssertionResult(
