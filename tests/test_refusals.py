@@ -302,8 +302,10 @@ class TestSerialisation:
         text = _format_csv([_refused_result()])
         header, row = list(csv.reader(io.StringIO(text)))[:2]
 
+        from tests.conftest import V019_COLUMNS
+
         assert tuple(header) == CSV_COLUMNS
-        assert len(header) == 23
+        assert tuple(header[: len(V019_COLUMNS)]) == V019_COLUMNS
         cells = dict(zip(header, row, strict=True))
         assert cells["stop_reason"] == "refusal"
         assert cells["stop_category"] == "reasoning_extraction"
