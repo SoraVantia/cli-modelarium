@@ -280,6 +280,22 @@ async def test_rate_limit_error_with_retry_after(monkeypatch: pytest.MonkeyPatch
     assert exc_info.value.provider == "anthropic"
 
 
+@pytest.mark.parametrize("status", [502, 503, 504])
+async def test_transient_5xx_is_retryable(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    """The transient gateway states are retryable alongside Anthropic's own 529."""
+    err = anthropic.APIStatusError(
+        "upstream unavailable",
+        response=_build_response(status),
+        body=None,
+    )
+    provider, _ = _make_provider(monkeypatch, error=err)
+
+    with pytest.raises(ProviderOverloadedError):
+        await provider.complete("p", "claude-opus-4-8", 0.0)
+
+
 async def test_529_overloaded_translated(monkeypatch: pytest.MonkeyPatch) -> None:
     """Anthropic's 529 'overloaded_error' is distinct from 429."""
     err = anthropic.APIStatusError(
