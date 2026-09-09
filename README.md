@@ -1,5 +1,5 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/cli-modelarium-wordmark-dark.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/SoraVantia/cli-modelarium/main/docs/assets/cli-modelarium-wordmark-dark.svg">
   <img alt="cli modelarium" src="https://raw.githubusercontent.com/SoraVantia/cli-modelarium/main/docs/assets/cli-modelarium-wordmark-light.png" width="420">
 </picture>
 
@@ -45,8 +45,7 @@ cli-modelarium configure
 
 # Run your first comparison
 cli-modelarium "Explain quantum computing in one sentence" \
-  --models gpt-5.5,claude-opus-4-8,gemini-3.1-pro-preview \
-  --temperatures 0,0.7
+  --models gpt-5.5,claude-opus-4-8,gemini-3.1-pro-preview
 ```
 
 That's it. You'll see all three models stream their responses live in parallel, with latency, token counts, and cost displayed in a clean comparison table.
@@ -83,7 +82,7 @@ That's it. You'll see all three models stream their responses live in parallel, 
 
 ### 🧪 Evaluation features
 
-- **Statistical reproducibility analysis** - `--runs N` runs each configuration N times and reports mean/median/stdev/CV of latency and tokens, output frequency, mode output, and output diversity. Combine with `--check-hallucination` to measure hallucination rate across runs.
+- **Statistical reproducibility analysis** - `--runs N` runs each configuration N times and reports mean/stdev/CV of latency and tokens, output frequency, mode output, and output diversity. Combine with `--check-hallucination` to measure hallucination rate across runs.
 - **Deterministic assertions** - 10 assertion types (`contains`, `regex`, `json_valid`, `json_schema`, `max_length_chars`, `latency_under`, `cost_under`, and more) with pass/fail output and CI exit codes
 - **LLM-as-a-judge scoring** - Use one LLM to score outputs from others on quality criteria
 - **Judge panels** - Multiple judges average scores for less biased evaluation
@@ -98,10 +97,10 @@ That's it. You'll see all three models stream their responses live in parallel, 
 ### 💾 Output formats
 
 - **Live terminal** - Rich-powered panels with progress bars and streaming display
-- **CSV** - Spreadsheet-friendly (open in Excel, Google Sheets, pandas)
+- **CSV** - Spreadsheet-friendly (open in Excel, Google Sheets, pandas). **The header row is the contract; column position is not.** Columns are appended as the tool grows, so read by name.
 - **JSON** - Structured for scripts and pipelines
 - **Markdown** - Pretty tables for blog posts and reports
-- **Exit codes** - 0/1/2 reflecting pass/fail status for CI/CD
+- **Exit codes** - 0/1/2/3 reflecting pass/fail status for CI/CD
 
 ### 💰 Cost transparency
 
@@ -109,7 +108,7 @@ That's it. You'll see all three models stream their responses live in parallel, 
 - Total cost summary per comparison
 - Judge cost shown separately when LLM-as-judge is enabled
 - Local models displayed as "Free"
-- `--max-cost` flag to prevent surprise bills
+- `--max-cost` flag that stops dispatching new calls once the ceiling is passed (calls already in flight still finish, so it bounds a run rather than preventing a bill)
 
 ### 🔒 Security
 
@@ -205,10 +204,18 @@ cli-modelarium "Q" --models gpt-5.5,claude-opus-4-7 --runs 10 --no-significance
 
 ### Bootstrap confidence intervals (v0.1.3)
 
-Every reported mean comes with a bootstrap confidence interval showing
-measurement uncertainty. CIs are auto-enabled whenever `--runs > 1`, and the
-default method is BCa (bias-corrected and accelerated) — the publication-grade
-standard.
+Every per-cell mean comes with a bootstrap confidence interval showing
+measurement uncertainty. A cell is one `(model, temperature, system prompt)`
+combination, and each cell's interval is computed from that cell's own runs, so
+a two-temperature sweep reports two intervals rather than one shared between
+them. CIs are auto-enabled whenever `--runs > 1`, and the default method is BCa
+(bias-corrected and accelerated) — the publication-grade standard.
+
+A metric that does not vary within a cell gets no interval. At temperature 0 a
+model often returns the identical answer on every run, so its token and cost
+samples are constant and there is nothing for the bootstrap to resample;
+latency still varies, so it keeps one. Raising `--runs` does not bring the
+missing intervals back — that is how you tell this from too few samples.
 
 ```bash
 cli-modelarium "Q" \
@@ -360,15 +367,18 @@ The command exits with code 1 if pass rate drops below 90%, failing the build.
 | Code | Meaning |
 |------|---------|
 | `0` | Success. |
-| `1` | Assertion failure - one or more assertions did not pass, or a `batch` run verified nothing. Only `batch` produces an assertion verdict; `compare` can still exit `1` on an unexpected error. |
+| `1` | Assertion failure - one or more assertions did not pass, a `batch` run verified nothing, or a model refused and left configured assertions unevaluated. Only `batch` produces an assertion verdict; `compare` can still exit `1` on an unexpected error. |
 | `2` | The run could not complete. |
+| `3` | `--max-cost` stopped the run. Cells that had already started were allowed to finish, so the saved output holds what was measured and marks the calls that never ran. The ceiling bounds further dispatch, not spend already committed. |
+| `4` | `diff` found a difference. Its own code because every other non-zero code means something went wrong, and a `diff` that reports movement succeeded. Only `diff` produces it. |
 
 Code `2` covers several distinct causes and **does not distinguish between them**: a missing API key, an unknown model, a retired model, a provider error, an exceeded cost cap, a malformed batch file, a rejected flag combination, an output-file conflict, or an exceeded batch size cap.
 
-Two rules are worth knowing before you gate a pipeline on these:
+Three rules are worth knowing before you gate a pipeline on these:
 
 - **Call failures outrank assertions.** If any model call fails, `batch` exits `2` without reporting an assertion verdict, even if assertions also failed. A red suite and a broken API key look the same from the exit code.
 - **An unreachable local server is not a failure.** `list-models --local` exits `0` when no server answers, so the exit code cannot be used to detect one.
+- **A refusal fails the gate, whatever the pass rate says.** A declined request has no output to assert against, so its assertions are recorded as errored and excluded from the pass rate - which means the rate above them describes only the requests that were answered. `batch` exits `1` when a refusal left any configured assertion unevaluated, even at a pass rate of 100%. The JSON reports how many under `total_assertions_refused`.
 
 To find out *why* a run failed, read the `error` field of each result from JSON output - it carries the provider's message, with credential-shaped strings redacted:
 
@@ -382,9 +392,79 @@ if [ "$code" -eq 2 ]; then
 fi
 ```
 
+A refusal is not an error - `error` stays `null` on a declined request, so its cost stays in every total, and exit code `1` rather than `2` is what reports it. `select(.error)` therefore returns nothing for the run a refusal turned red. To cover both:
+
+```bash
+jq -r '.results[] | select(.error or .refused)
+       | "\(.model): \(.error // "refused: " + (.stop_category // "no category"))"' results.json
+```
+
 `--output-format json` is required - the default output carries no machine-readable error field. Note that failures which happen *before* any model is called (a missing key, an unknown model, a bad batch file) produce no JSON at all; the console message is the only signal in those cases.
 
-**Privacy note:** Every output format - JSON, CSV and Markdown - embeds the full prompt and the full model response for every result, alongside any provider error message. JSON additionally embeds each judge's reasoning text; `--include-reasoning` gates only the console display, not the file, and CSV and Markdown do not carry it. Treat any output file as sensitive before committing it or uploading it as a public CI artifact. Separately, providers differ on data retention and on whether they train on what you send; this tool makes no claim about any of them, and you should check the terms of each provider you configure. Claude Fable 5.1 requires 30-day retention and is not available under zero-data-retention.
+#### Run identity
+
+Every JSON payload carries four top-level fields that say *which run it is*. Before this release it could not: two runs of the identical command produced JSON that differed in `latency_ms` and `ttft_ms` and in nothing else. A probe against the published 0.1.9 measured exactly that pair, 93 seconds apart, and the second run was the faster one - so even "higher latency ran earlier" would have ordered them backwards. Filesystem mtime was the only signal left, and it does not survive `git add`, a copy, a tar extract or an artifact upload.
+
+| Field | What it is |
+|-------|------------|
+| `started_at` | When the run began - ISO 8601 UTC, second precision, `Z` suffix. Taken before flag resolution and before any provider call, so it is a start time and not a finish time. |
+| `run_id` | A UUID identifying this run. It survives copying and renaming, and separates two runs that began in the same second. |
+| `experiment_key` | Sixteen hex characters of a SHA-256 over the inputs that define the experiment. Two payloads that share one are measuring the same thing. |
+| `invocation` | The resolved flags: command name, model list, temperatures, system prompts and judge models. |
+
+All four come from `compare` and `batch` alike, unconditionally. Markdown carries `Started at` and `Run ID` as well; CSV carries none of them, since identity is run-level and CSV is row-level.
+
+```bash
+# Are two payloads even comparable?
+[ "$(jq -r .experiment_key before.json)" = "$(jq -r .experiment_key after.json)" ] \
+  && echo "same experiment" || echo "different experiment - do not compare"
+```
+
+`started_at` uses seconds and `Z` rather than microseconds and `+00:00` because jq's `fromdateiso8601` - the first thing a shell monitor reaches for - rejects both of the others.
+
+**`invocation` records what ran, not what you typed.** A run launched with `--models all-flagship` lists the ids that group expanded to, which is what a consumer needs: group membership is registry state and moves between releases, so the name alone would not let anyone reproduce the run.
+
+**Nothing secret can reach `invocation`, and that is an allowlist rather than a redaction pass.** The field is built from four named keys, so anything not named there cannot get in. `--local-url` is excluded because it can carry credentials in the userinfo position (`http://user:pass@host/v1`) - a shape no pattern matcher can be trusted to catch. File paths are excluded because a path leaks a home directory and a username, while the content that matters is recorded anyway. Building the field from a fixed list is the stronger guarantee: a redaction pass would have to recognise every secret it was shown, and this one never sees any.
+
+**What `experiment_key` hashes:** the resolved command name, the prompts, the model list, the temperatures, the resolved system prompts, the judge models and the run count. Measured values are excluded by construction - latency, cost and token counts are the outputs being compared, and a key that moved with them would never match. So is the output destination, since `--output report.json` and `--output-format json` piped to stdout are the same experiment written twice. The inputs are documented here and at the constant itself because a hash whose inputs are unknown is worse than no hash: two keys that differ tell a consumer nothing unless they know whether the experiment changed or the hashing did. `EXPERIMENT_KEY_VERSION` exists for the same reason, and is bumped when the hash inputs change - never for a cosmetic edit.
+
+**The run count is in the key.** `--runs 1` and `--runs 10` over the same cells do not share one, deliberately: the second answers a question about variance that the first cannot, so a monitor that pooled them would be comparing a point estimate against a distribution.
+
+**The model list is deliberately not sorted.** Sorting would let `--models a,b` and `--models b,a` share a key, which is defensible on the grounds that the same cells are measured - but `prompt_id` in `compare` is a positional row ordinal, so `p1` is a different model in each of those two runs. A consumer joining them on `(experiment_key, prompt_id)` would mis-align every row while both keys agreed. A false "different" costs one skipped comparison; a false "same" silently corrupts one. The temperature list keeps the order given for the same reason.
+
+**An identical `experiment_key` does not mean identical results.** Measured live on `gemini-3.8-flash`: two invocations identical in every way the key can see returned the same output text - `Paris` both times - with 65 then 58 output tokens, costing `$0.00025125` and then `$0.000225`. Across the eight runs that returned a result `output_tokens` spanned 58 to 66 at a fixed input of 10, because a thinking model's internal tokens vary from call to call. Those eight are the whole sweep and not a selection from it: fourteen attempts ran on 2026-09-06 and six came back 503, landing as dead cells at zero tokens that no span can be taken from. Cost moving between two runs of one experiment is therefore normal, and is not evidence that anything changed. That is the argument *for* the key rather than against it: two runs that differ in cost can still be recognised as the same experiment, which is what you need before you can ask whether the difference means anything.
+
+#### Comparing two runs
+
+`diff` reads two JSON payloads you already have and reports what moved. It writes nothing, stores nothing and watches nothing.
+
+```bash
+cli-modelarium compare "capital of France?" --models gpt-5.5,claude-opus-4-8 --output before.json
+# ... later ...
+cli-modelarium compare "capital of France?" --models gpt-5.5,claude-opus-4-8 --output after.json
+
+cli-modelarium diff before.json after.json
+```
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/SoraVantia/cli-modelarium/main/docs/assets/cli-modelarium-diff-demo-4model.gif" alt="Terminal demo of cli-modelarium: the same comparison is run twice across claude-fable-5-1, gemini-3.8-flash, gemini-3.7-flash and claude-haiku-4-5, then diff reports every answer text unchanged while cost moves on the two Gemini rows and stays flat on the two Claude rows." width="1088">
+</p>
+
+**Argument order sets the direction.** The first file is read as the earlier run, whatever the timestamps say. Nothing in a payload can order two runs written in the same second - `started_at` has second precision and `run_id` is a random UUID carrying no time - so the rule that is always available is the one you typed. When `started_at` disagrees, `diff` says so and carries on.
+
+It compares cells, not files. Two rows can share a model, a temperature and a system prompt, because `--temperatures 0,0` asks for the same cell twice, so the join also counts each row's position within its own cell group. Unchanged cells are hidden; `--all` shows them.
+
+**Every shown cell reports whether the answer text changed, before its numbers.** A thinking model routinely returns the same text at a different token cost, so "the cost moved and the answer did not" is the ordinary reading - and a changed answer at an identical token count would otherwise move nothing and be hidden. It is same or not same, never a similarity score: a percentage there would be a number the payload does not contain. When a side refused, errored or was stopped, there is no answer to compare and the command says that instead.
+
+**What it refuses:** a changed prompt, a changed run count (one run is a point estimate and ten are a distribution), and a `batch` payload against a `compare` one. An added or removed model is not a refusal - the overlapping cells stay comparable, and cells that ran on only one side are listed on their own.
+
+**What it qualifies instead of refusing:** two payloads priced from different rate tables are still comparable, but part of the cost difference is the price list rather than the models, so that is said before any cost figure. A truncated run, a changed judge model, and a payload older than 0.2.0 are flagged the same way. An older payload is still compared, by matching row content, and `diff` names the two things that shape cannot tell it - which command wrote the payload, and which judges ran.
+
+Significance verdicts are printed from both sides and never subtracted. A p-value describes one sample, so two of them from independent runs are both true and their difference is not a quantity either one contains.
+
+`--output-format json` carries every cell, changed or not, all six metrics and every qualifier. The console shows cost, latency and output tokens for the cells that moved. Exit codes are in the table above: nothing moved is `0`, something moved is `4`, and a pair that cannot be compared is `2`.
+
+**Privacy note:** Every output format - JSON, CSV and Markdown - embeds the full prompt, the full system prompt and the full model response for every result, alongside any provider error message. JSON additionally embeds each judge's reasoning text; `--include-reasoning` gates only the console display, not the file, and CSV and Markdown do not carry it. Treat any output file as sensitive before committing it or uploading it as a public CI artifact. Separately, providers differ on data retention and on whether they train on what you send; this tool makes no claim about any of them, and you should check the terms of each provider you configure. Claude Fable 5.1 requires 30-day retention and is not available under zero-data-retention. A judge model is a second provider: `--judge` forwards your prompt as well as the model's response to it, so judging widens who sees the prompt. A request the first model declines is no longer sent to a judge at all. A `compare` report also records the environment that produced it - the tool version, the exact installed `scipy` version and the full Python version - in the `methodology` block of JSON and Markdown, at every run count. That is host metadata rather than your data, but it pins a dependency version precisely. CSV carries none of it, and `batch` records none of it.
 
 ### More examples
 
@@ -473,24 +553,24 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 
 ## Supported providers
 
-| Provider | API Keys Needed | Streaming | Cost Tracking |
-|----------|-----------------|-----------|---------------|
-| OpenAI (GPT-5, GPT-5 mini, o3, o4-mini, etc.) | ✅ | ✅ | ✅ |
-| Anthropic (Claude Opus 4.8, Sonnet 4.6, Haiku 4.5, etc.) | ✅ | ✅ | ✅ |
-| Google (Gemini 3.5 Flash, Gemini 3.1 Pro, etc.) | ✅ | ✅ | ✅ |
-| xAI (Grok 4.3, etc.) | ✅ | ✅ | ✅ |
-| DeepSeek (V4 Pro, V4 Flash, etc.) | ✅ | ✅ | ✅ |
-| Mistral (Large, Medium, Small) | ✅ | ✅ | ✅ |
-| Groq (Llama 3.3, Llama 4 Scout, gpt-oss) | ✅ | ✅ | ✅ |
-| OpenRouter (8 registered IDs: Qwen, DeepSeek R1, Llama 3.3, gpt-oss, GLM) | ✅ | ✅ | ✅ |
-| Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, etc.; select Qwen models, International/Singapore) | ✅ | ✅ | ✅ |
-| Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air, etc.; OpenAI-compatible, overseas endpoint) | ✅ | ✅ | ✅ |
-| NVIDIA NIM (9 registered IDs: Nemotron, Gemma 4, Mistral Nemotron, MiniMax M3, Laguna, Llama 3.1) | ✅ | ✅ | No published rate |
-| Moonshot AI / Kimi (4 registered IDs: K3, K2.7 Code, K2.7 Code HighSpeed, K2.6) | ✅ | ✅ | ✅ |
-| **Local: Ollama** | ❌ | ✅ | Free |
-| **Local: LM Studio** | ❌ | ✅ | Free |
-| **Local: vLLM** | ❌ | ✅ | Free |
-| **Local: llama.cpp server** | ❌ | ✅ | Free |
+| Provider | API Keys Needed | Streaming | Cost Tracking | Pricing verified |
+|----------|-----------------|-----------|---------------|------------------|
+| OpenAI (GPT-6 Astra, GPT-5.6 Sol, GPT-5.5, o3, etc.) | ✅ | ✅ | ✅ | `first-party` |
+| Anthropic (Claude Opus 5, Sonnet 5, Fable 5.1, Haiku 4.5, etc.) | ✅ | ✅ | ✅ | `first-party` |
+| Google (Gemini 3.8 Flash, 3.7 Flash, 3.1 Pro, etc.) | ✅ | ✅ | ✅ | `first-party` |
+| xAI (Grok 4.6, Grok 4.3, etc.) | ✅ | ✅ | ✅ | `first-party` |
+| DeepSeek (V4 Pro, V4 Flash, etc.) | ✅ | ✅ | ✅ | `first-party` |
+| Mistral (Medium, Large, Small, Codestral) | ✅ | ✅ | ✅ | `first-party` |
+| Groq (Llama 3.3, Llama 4 Scout, gpt-oss) | ✅ | ✅ | ✅ | `third-party` |
+| OpenRouter (8 registered IDs: Qwen, DeepSeek R1, Llama 3.3, gpt-oss, GLM) | ✅ | ✅ | ✅ | `unchecked` |
+| Alibaba/DashScope (Qwen3.8 Max, Qwen3.7 Max, Qwen3 Coder, etc.; select Qwen models, International/Singapore) | ✅ | ✅ | ✅ | `first-party` |
+| Z.AI/GLM (GLM-5.3, GLM-5.2, GLM-4.7, etc.; OpenAI-compatible, overseas endpoint) | ✅ | ✅ | ✅ | `first-party` |
+| NVIDIA NIM (9 registered IDs: Nemotron, Gemma 4, Mistral Nemotron, MiniMax M3, Laguna, Llama 3.1) | ✅ | ✅ | No published rate | `unpublished` |
+| Moonshot AI / Kimi (4 registered IDs: K3, K2.7 Code, K2.7 Code HighSpeed, K2.6) | ✅ | ✅ | ✅ | `reseller` |
+| **Local: Ollama** | ❌ | ✅ | Free | — |
+| **Local: LM Studio** | ❌ | ✅ | Free | — |
+| **Local: vLLM** | ❌ | ✅ | Free | — |
+| **Local: llama.cpp server** | ❌ | ✅ | Free | — |
 
 Run `cli-modelarium list-models` to see all currently supported models.
 
@@ -504,7 +584,7 @@ Instead of listing model IDs, `--models` accepts a group shortcut. Static groups
 |-------|--------|
 | `all-premium` / `all-flagship` | gpt-5.6-sol, claude-opus-5, gemini-3.1-pro-preview, grok-4.6, deepseek-v4-pro, mistral-large-latest, qwen3.8-max, glm-5.2 |
 | `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
-| `all-reasoning` | o3, o4-mini, deepseek-v4-pro, magistral-medium-latest, magistral-small-latest, glm-5.2 |
+| `all-reasoning` | o3, o4-mini, deepseek-v4-pro, glm-5.2 |
 | `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
 | `all-open-weight` | openai/gpt-oss-120b, openai/gpt-oss-safeguard-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
 
@@ -523,7 +603,7 @@ cli-modelarium "Explain CAP theorem" --models all-local
 
 Cli Modelarium uses a modular provider abstraction layer that hides the API differences between OpenAI's `messages` array, Anthropic's top-level `system` parameter, Google's `system_instruction`, and others. Every provider implements the same async streaming interface, so the CLI can run them all in parallel with `asyncio.gather()`.
 
-Cost calculations come from each provider's reported `usage` field (input tokens, output tokens, cached tokens) multiplied by current pricing constants. Pricing data was verified from official provider documentation on **July 29, 2026** - see [Notes & Limitations](#notes--limitations) for caveats.
+Cost calculations come from each provider's reported `usage` field (input tokens, output tokens, cached tokens) multiplied by current pricing constants. Most pricing data was verified from official provider documentation on **September 6, 2026**; four providers were not fully covered - see [Notes & Limitations](#notes--limitations).
 
 For local models, the same OpenAI Python SDK is used with a custom `base_url`, since Ollama, LM Studio, vLLM, and llama.cpp all expose OpenAI-compatible REST endpoints.
 
@@ -531,9 +611,9 @@ For local models, the same OpenAI Python SDK is used with a custom `base_url`, s
 
 ### Pricing data
 
-Most pricing built into Cli Modelarium was verified from official provider documentation on **July 29, 2026**. Some entries carry their own verification date, noted beside each one in the registry; the Z.AI/GLM prices are the oldest, at **June 22, 2026**. LLM pricing changes frequently (sometimes monthly). The `pricing_as_of` date is carried in JSON output and shown in the console; CSV and Markdown output do not include it. Always verify against each provider's official pricing page before relying on cost calculations for budgeting or production decisions.
+Most pricing built into Cli Modelarium was verified from official provider documentation on **September 6, 2026**. Some entries carry their own verification date, noted beside each one in the registry. Groq, Moonshot, NVIDIA and OpenRouter were not fully verified in that pass and are marked as unverified in the registry. Two sets of rates are known to expire: `gemini-3.6-flash`, `gemini-3.7-flash` and `gemini-3.8-flash` are on introductory rates that double on January 1, 2027, and `gpt-5.6-sol` is on a promotional rate that ends around November 21, 2026. Both make a comparison run today look cheaper than the same run will be later, and both move uniformly, so nothing in the output stands out as odd. LLM pricing changes frequently (sometimes monthly). The `pricing_as_of` date is carried in JSON and Markdown output and shown in the console; CSV output does not include it. Always verify against each provider's official pricing page before relying on cost calculations for budgeting or production decisions.
 
-Prices are each provider's standard/list public rate per 1M tokens (not batch, priority, off-peak, or promotional pricing); for input-size-tiered models the entry/short-context tier is shown, and cached pricing is the cache-read rate. DashScope/Qwen costs reflect non-thinking rates (the tool sends `enable_thinking=false`).
+Prices are each provider's standard/list public rate per 1M tokens (not batch, priority, off-peak, or promotional pricing, with one annotated exception: `gpt-5.6-sol`, whose current published rate is promotional); for input-size-tiered models the entry/short-context tier is shown, and cached pricing is the cache-read rate. DashScope/Qwen costs reflect non-thinking rates (the tool sends `enable_thinking=false`).
 
 NVIDIA NIM is the exception. NVIDIA publishes no per-token rate for its hosted NIM endpoints, so cost is not tracked for NVIDIA models: the zero shown in the cost column is the absence of a rate, not a price of zero. Because that cost is always zero, `--max-cost` will never trigger on an NVIDIA model and a `cost_under` assertion will always pass - neither gives you any spending protection on this provider. Access is metered in account credits rather than billed per token, so the failure mode to watch for is exhausting your credits, not an unexpected bill. A caveat panel is printed whenever an NVIDIA model is part of a run.
 
@@ -572,13 +652,14 @@ The hallucination detection preset is a useful comparison signal between models,
 LLMs are non-deterministic at temperature > 0 - re-running the same prompt may produce different outputs. A single comparison run shows you ONE sample from each model, not a definitive quality verdict.
 
 To draw more reliable conclusions:
-- Use `--runs 5` (or higher) to automatically run each comparison N times and see statistical summaries: mean/median latency, coefficient of variation, mode output, and output diversity. Coefficient of variation below 0.05 indicates stable model behavior across runs.
+- Use `--runs 5` (or higher) to automatically run each comparison N times and see statistical summaries: mean latency, coefficient of variation, mode output, and output diversity. Coefficient of variation below 0.05 indicates stable model behavior across runs.
 - For hallucination consistency analysis, combine `--runs` with `--check-hallucination` to see how often the model produces hallucinations across multiple runs (the hallucination rate).
-- Use `--temperatures 0` for more deterministic outputs. Some models do not accept a temperature setting at all - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `claude-fable-5-1`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.7-code-highspeed` and `kimi-k2.6`. The tool omits the field for those so the call still succeeds, and they run at their provider's default instead.
+- Use `--temperatures 0` for more deterministic outputs. Some models do not accept a temperature setting at all - `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `claude-fable-5-1`, `o3`, `o4-mini`, `gpt-5`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, `gemini-3.8-flash`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.7-code-highspeed` and `kimi-k2.6`. The tool omits the field for those so the call still succeeds, and they run at their provider's default instead.
+- Use `--system-prompts "You are terse.,You are verbose."` to run the same prompt under several system prompts and compare them side by side. It multiplies the call count like `--models` and `--temperatures` do. Where more than one is in play the reports label each row `SP 1`, `SP 2` and so on, and print a legend giving the full text of each - so `SP 2` in the per-cell summary is the same prompt as `SP 2` in the table above it. CSV and JSON carry the full system prompt on every row instead.
 - Compare across multiple prompts, not just one
-- Use the `--output json` flag to save runs for systematic analysis (with `--runs > 1` the JSON includes per-cell `stats_by_cell` aggregates)
+- Use the `--output-format json` flag to save runs for systematic analysis (with `--runs > 1` the JSON includes per-cell `stats_by_cell` aggregates)
 
-Those twelve models are called without the temperature field, and `models_without_temperature` in the JSON output names the ones affected by any given run. Three consequences are worth knowing. A multi-value `--temperatures` sweep against one of them issues identical requests rather than a sweep, and the tool prints a warning when that happens. The temperature shown in the results table, the CSV and each JSON result record is the value you **requested**, not the value applied. And `--significance` is where this can change a conclusion rather than a label: comparing a model that omits temperature against one that honours it produces a variance difference that is a sampling artifact, which Welch or Mann-Whitney will report as though it were a model-quality difference. That case does warn: any significance run mixing an affected model with an unaffected one prints a `Temperature not applied` panel naming the models that ran at the provider default, and sets `significance_temperature_mixed` to `true` in the JSON output. A multi-temperature run that is also mixed gets both messages in a single panel. CSV carries no equivalent signal.
+Those nineteen models are called without the temperature field, and `models_without_temperature` in the JSON output names the ones affected by any given run. Three consequences are worth knowing. A multi-value `--temperatures` sweep against one of them issues identical requests rather than a sweep, and the tool prints a warning when that happens. The temperature shown in the results table, the CSV and each JSON result record is the value you **requested**, not the value applied. And `--significance` is where this can change a conclusion rather than a label: comparing a model that omits temperature against one that honours it produces a variance difference that is a sampling artifact, which Welch or Mann-Whitney will report as though it were a model-quality difference. That case does warn: any significance run mixing an affected model with an unaffected one prints a `Temperature not applied` panel naming the models that ran at the provider default, and sets `significance_temperature_mixed` to `true` in the JSON output. A multi-temperature run that is also mixed gets both messages in a single panel. CSV carries no equivalent signal.
 
 ## About
 
