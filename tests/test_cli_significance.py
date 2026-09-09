@@ -399,5 +399,8 @@ class TestBackwardCompat:
         assert result.exit_code == 0, result.output
         payload = json.loads(out.read_text())
         assert "significance_tests" not in payload
-        assert "total_runs" not in payload
+        # `total_runs` is now ALWAYS present and reads 1 here. Its absence was a
+        # working single-run test and is not one any more - read the value. The
+        # keys that remain runs-gated still are.
+        assert payload["total_runs"] == 1
         assert "stats_by_cell" not in payload
