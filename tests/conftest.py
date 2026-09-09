@@ -194,3 +194,41 @@ def fake_openai_stream() -> Any:
         return FakeAsyncStream(chunks)
 
     return _build
+
+
+# The 23 CSV columns as v0.1.9 shipped them, frozen as a literal rather than
+# derived from CSV_COLUMNS.
+#
+# THIS IS THE ASSERTION THAT ENCODES "APPEND, NEVER INSERT". The pins it
+# replaces were `len(CSV_COLUMNS) == 23` plus a single `CSV_COLUMNS[4] ==
+# "temperature"`, and the width check ran first, so on any addition it fired
+# and the one real index pin never reported. A prefix check against a frozen
+# tuple survives growth and fails loudly on a reorder or an insert, which is
+# the change it exists to catch. Every other CSV_COLUMNS assertion in the suite
+# compares the emitted header back to CSV_COLUMNS itself and is tautological
+# with respect to ordering.
+V019_COLUMNS: tuple[str, ...] = (
+    "prompt_id",
+    "prompt",
+    "system",
+    "model",
+    "temperature",
+    "latency_ms",
+    "ttft_ms",
+    "input_tokens",
+    "output_tokens",
+    "cached_tokens",
+    "cost_usd",
+    "output",
+    "error",
+    "retries",
+    "judge_score_avg",
+    "judge_score_std",
+    "judge_count",
+    "hallucination_risk",
+    "assertions_passed",
+    "assertions_total",
+    "assertions_failed_types",
+    "stop_reason",
+    "stop_category",
+)
