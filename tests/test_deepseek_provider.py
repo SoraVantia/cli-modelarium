@@ -104,8 +104,8 @@ async def test_no_thinking_param_sent(
 async def test_complete_calculates_cost(
     monkeypatch: pytest.MonkeyPatch, fake_openai_stream: Any
 ) -> None:
-    # deepseek-v4-pro: $0.435/M input, $0.87/M output.
-    # 1000 input + 500 output = $0.000435 + $0.000435 = $0.00087
+    # deepseek-v4-pro at PEAK: $1.32/M input, $3.96/M output.
+    # 1000 input + 500 output = $0.00132 + $0.00198 = $0.0033
     stream = fake_openai_stream(
         text_chunks=["hi"],
         input_tokens=1000,
@@ -117,4 +117,4 @@ async def test_complete_calculates_cost(
 
     assert result.provider == "deepseek"
     assert result.model == "deepseek-v4-pro"
-    assert result.cost_usd == pytest.approx(0.00087)
+    assert result.cost_usd == pytest.approx(0.0033)
