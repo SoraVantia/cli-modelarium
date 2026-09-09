@@ -233,9 +233,9 @@ def test_show_all_runs_overrides_auto_collapse() -> None:
     provider = _CountingProvider()
 
     async def go() -> None:
-        # We pass show_all_runs=True; the threshold check should not flip
-        # live_display off. We can't easily assert the Live being on without
-        # mocking, but we CAN verify the run completes with the correct
+        # show_all_runs=True must stop the threshold check flipping
+        # live_display off. Asserting the Live is on needs mocking; the
+        # reachable assertion is that the run completes with the correct
         # number of tasks.
         states = await run_streaming_comparison(
             prompt="q",
