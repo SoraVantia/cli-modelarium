@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 from rich.console import Console, Group
 from rich.live import Live
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -43,10 +44,16 @@ from cli_modelarium.security import redact_secrets
 # be worth having. --concurrency overrides it per run.
 DEFAULT_CONCURRENCY = 5
 
-# Retries, not attempts: `range(max_retries + 1)` makes this four tries. With
-# RATE_LIMIT_BASE_DELAY_SECONDS doubling each time, a cell that is going to
-# fail spends about seven seconds (1 + 2 + 4) before saying so, which is the
-# ceiling on how long a run hangs on one exhausted quota.
+# Retries, not attempts: `range(max_retries + 1)` makes this four tries, so a
+# failing cell sleeps three times before it gives up. That count is the
+# ceiling; the elapsed time has none. With RATE_LIMIT_BASE_DELAY_SECONDS
+# doubling each time, a 429 carrying no `retry-after` spends about seven
+# seconds (1 + 2 + 4), and the 529 path, which never reads the header, spends
+# 35 (5 + 10 + 20). A header that IS sent is honoured as given:
+# `_retry_after_seconds` returns `float(raw)` and nothing clamps it, so a
+# `Retry-After: 3600` on each of the three sleeps holds one cell for three
+# hours, which is indistinguishable from a hang. No flag bounds the wait or
+# the attempt count.
 DEFAULT_MAX_RETRIES = 3
 
 # Auto-collapse threshold for the live streaming display. Above this many
@@ -76,6 +83,82 @@ OVERLOADED_BASE_DELAY_SECONDS = 5.0
 Status = str
 
 
+class CostLedger:
+    """Running total of known spend against the user's `--max-cost` ceiling.
+
+    THE CAP STOPS FURTHER DISPATCH. IT DOES NOT PREVENT SPEND, and every part of
+    this design follows from that. A request already sent to a provider cannot
+    be un-sent, and cancelling it mid-stream is worse than useless: usage is
+    read inside the provider's chunk loop, so an abandoned call never yields its
+    cost and would report $0.00 for work that really happened. The run's total
+    would then be smaller than the bill.
+
+    So a dispatched cell is always finished. Only cells not yet started are
+    skipped. The cost of that choice is a bounded overshoot - at most
+    `concurrency - 1` extra cells beyond the ceiling, measured at 10% serially,
+    50% at the default concurrency of 5, and 100% at 10 - and its benefit is
+    that every number the run reports is one it actually measured.
+
+    Shared across BOTH gathers. Judge calls have their own per-provider
+    semaphores and run after the main pass, and their cost lands on `JudgeScore`
+    rather than on a `StreamState`, so a ledger living on the state would count
+    none of it.
+
+    No lock. Single-threaded asyncio makes `+=` atomic because no await sits
+    inside the statement; measured at 20 tasks x 10,000 increments with an
+    explicit yield between each, zero updates are lost.
+    """
+
+    def __init__(self, ceiling: float | None) -> None:
+        self._ceiling = ceiling
+        self._spent = 0.0
+        self._skipped = 0
+
+    @property
+    def spent(self) -> float:
+        """Total of every cost this ledger was told about."""
+        return self._spent
+
+    @property
+    def ceiling(self) -> float | None:
+        return self._ceiling
+
+    @property
+    def skipped(self) -> int:
+        """Calls never dispatched because the ceiling had been passed.
+
+        Counted here rather than by inspecting states, because a skipped JUDGE
+        call has no `StreamState` to inspect - counting states alone reported
+        "0 calls were never started" on a run whose judge phase was cut short.
+        """
+        return self._skipped
+
+    def skip(self) -> None:
+        self._skipped += 1
+
+    @property
+    def exhausted(self) -> bool:
+        """True once the ceiling has been reached, so no further cell starts.
+
+        `>` rather than `>=`, matching the pre-flight's `estimated > max_cost`.
+        The same flag must not change operator between the estimate and the run.
+        It also keeps `--max-cost 0` meaning "free models only": with `>=`, a
+        zero ceiling is exhausted before the first call and the 17 zero-cost
+        registry rows never run, even though they can never cost anything.
+
+        The price is one extra cell at a positive ceiling - spending exactly the
+        ceiling does not stop the next dispatch - which is inside the overshoot
+        the concurrency already implies.
+        """
+        if self._ceiling is None:
+            return False
+        return self._spent > self._ceiling
+
+    def add(self, cost: float) -> None:
+        """Record a cell's real, measured cost."""
+        self._spent += cost
+
+
 @dataclass
 class StreamState:
     """Per-task state surfaced live in the streaming display.
@@ -103,6 +186,12 @@ class StreamState:
     refused: bool = False
     stop_reason: str | None = None
     stop_category: str | None = None
+    # The cost ceiling stopped this cell before it returned. Its cost is
+    # UNKNOWN rather than zero: usage is read inside the provider's chunk loop,
+    # so a cancelled call never yields it and `mark_complete` never runs - while
+    # the provider did the work regardless. Reporting 0.0 would understate the
+    # run's total, which is worse than reporting nothing.
+    cost_unknown: bool = False
     retry_message: str | None = None
     attempts: int = 0  # number of retries attempted (0 == first call only)
     _start: float | None = field(default=None, repr=False)
@@ -110,6 +199,26 @@ class StreamState:
     def mark_started(self) -> None:
         self._start = time.monotonic()
         self.status = "waiting"
+
+    def mark_attempt_start(self) -> None:
+        """Re-base the TTFT clock for a retry attempt.
+
+        `mark_started` runs once per cell, before the first attempt. Without
+        this, `_start` keeps that original instant and `append_text`
+        recomputes TTFT against it on the attempt that finally succeeds -
+        so the reported figure absorbs every failed attempt AND every
+        backoff sleep. Measured: 650 ms reported after a single retry whose
+        true time-to-first-token was near zero.
+
+        That mattered because rate limiting is not random: it correlates
+        with provider and model, so the inflation landed on whichever model
+        was throttled and silently reordered a latency comparison.
+
+        `latency_ms` needs no equivalent: it is taken from
+        `CompletionResult`, which every provider measures around its own
+        attempt, so it already excludes retry time. TTFT now matches it.
+        """
+        self._start = time.monotonic()
 
     def append_text(self, chunk: str) -> None:
         """Callback hook passed as `on_chunk=` to provider.complete()."""
@@ -130,10 +239,31 @@ class StreamState:
         self.cached_tokens = result.cached_tokens
         self.cost_usd = result.cost_usd
         self.latency_ms = result.latency_ms
-        # Prefer the provider's authoritative TTFT (measured around the
-        # actual SDK call) when our orchestrator-level estimate is missing.
-        if self.ttft_ms is None and result.ttft_ms is not None:
+        # The provider measures TTFT and latency off the SAME per-attempt
+        # clock (its own `start` inside `complete()`), so its TTFT is
+        # authoritative and OVERWRITES the orchestrator estimate rather
+        # than only filling in for it. `append_text` sets that estimate as
+        # chunks arrive so the live display has something to show mid-call;
+        # it is measured from a different instant and must not win at the
+        # end. Guarded on None only because a provider may not report one,
+        # in which case the estimate is all there is.
+        if result.ttft_ms is not None:
             self.ttft_ms = result.ttft_ms
+
+    def mark_cancelled(self) -> None:
+        """Stopped by the cost ceiling before the provider returned.
+
+        A fourth terminal status beside complete, refused and error. It is not
+        folded into `error`: nothing failed, and `error` drives assertion
+        skipping, exit codes and the statistics' `billed` filter, all of which
+        need to tell "the call broke" from "we stopped waiting for it".
+
+        `retry_message` is cleared because a cell cancelled during a backoff
+        sleep would otherwise render as still retrying forever.
+        """
+        self.status = "cancelled"
+        self.cost_unknown = True
+        self.retry_message = None
 
     def mark_error(self, message: str) -> None:
         self.status = "error"
@@ -145,6 +275,28 @@ class StreamState:
         self.retry_message = f"{reason}, retry in {delay_s:.1f}s (attempt {attempt + 1})"
 
 
+def index_distinct_prompts(systems: Iterable[str | None]) -> dict[str, int]:
+    """1-based indices for distinct system prompts, in first-seen order.
+
+    THE ONE NUMBERING. Three callers label system prompts `SP N` over three
+    different populations - the console runs table over states, the Markdown CI
+    section over CI cell keys, the Markdown report over results - and they must
+    agree, because a reader matches `SP 2` in one table against `SP 2` in
+    another. Written once here so they can differ in population and never in
+    logic.
+
+    Empty and None are not assigned an index: there is no prompt to name. The
+    "is it worth showing" rule is deliberately NOT applied here, because it
+    differs by caller - see `prompt_index_map` for the two-or-more rule and
+    `md_prompt_indices` for the one that counts a missing prompt as distinct.
+    """
+    seen: dict[str, int] = {}
+    for system in systems:
+        if system and system not in seen:
+            seen[system] = len(seen) + 1
+    return seen
+
+
 def prompt_index_map(states: list[StreamState]) -> dict[str, int]:
     """Build an order-preserving map of distinct system prompts to 1-based indices.
 
@@ -152,10 +304,7 @@ def prompt_index_map(states: list[StreamState]) -> dict[str, int]:
     empty if zero or one distinct non-empty system prompts are in play -
     that signals "don't bother showing per-row prompt identifiers".
     """
-    seen: dict[str, int] = {}
-    for s in states:
-        if s.system_prompt and s.system_prompt not in seen:
-            seen[s.system_prompt] = len(seen) + 1
+    seen = index_distinct_prompts(s.system_prompt for s in states)
     return seen if len(seen) > 1 else {}
 
 
@@ -179,7 +328,10 @@ def render_prompt_legend(states: list[StreamState]) -> Table | None:
         preview = prompt if len(prompt) <= 60 else prompt[:57] + "..."
         # Replace newlines so a multiline system prompt stays on one row.
         preview = preview.replace("\n", " / ")
-        table.add_row(f"SP {idx}", preview)
+        # Escaped AFTER the truncation above, so the slice still measures the
+        # prompt rather than the backslashes. This table is printed outside the
+        # `Live` block, so it renders on the --no-stream path too.
+        table.add_row(f"SP {idx}", escape(preview))
     return table
 
 
@@ -202,7 +354,8 @@ class StreamingDisplay:
             ttft_text = f"TTFT {state.ttft_ms / 1000:.2f}s" if state.ttft_ms is not None else ""
             status_text = f"[cyan]streaming[/cyan]  [dim]{ttft_text}[/dim]"
         elif state.status == "retrying":
-            status_text = f"[yellow]{state.retry_message or 'retrying'}[/yellow]"
+            retry = escape(state.retry_message) if state.retry_message else "retrying"
+            status_text = f"[yellow]{retry}[/yellow]"
         elif state.status == "complete":
             parts: list[str] = []
             if state.ttft_ms is not None:
@@ -215,13 +368,18 @@ class StreamingDisplay:
             status_text = f"[green]done[/green]  [dim]{'  '.join(parts)}[/dim]"
         elif state.status == "refused":
             # The cost is shown because a refusal is billed. The category is
-            # rendered verbatim - it is an open set and never branched on.
-            cat = f"  {state.stop_category}" if state.stop_category else ""
+            # rendered verbatim - it is an open set and never branched on - and
+            # `escape` is what makes "verbatim" true. Unescaped, Rich consumed
+            # the value as markup: a category of `a[b]c` rendered as `ac`, and
+            # one containing a `[link=...]` tag became a live terminal
+            # hyperlink. The provider chooses this string, so it is escaped
+            # rather than trusted.
+            cat = f"  {escape(state.stop_category)}" if state.stop_category else ""
             status_text = f"[yellow]refused{cat}[/yellow]  [dim]${state.cost_usd:.6f}[/dim]"
         elif state.status == "error":
             status_text = "[red]error[/red]"
         else:
-            status_text = state.status
+            status_text = escape(state.status)
 
         # When multiple distinct system prompts are in play, identify which
         # one this panel is for. We use the index (cheap, deterministic) and
@@ -232,16 +390,27 @@ class StreamingDisplay:
             if idx is not None:
                 sp_marker = f"  [magenta]SP {idx}[/magenta]"
 
-        title = f"[bold]{state.model}[/bold] @ {state.temperature:.1f}{sp_marker}   {status_text}"
+        # Each untrusted value is escaped AT ITS OWN INTERPOLATION, never as a
+        # composed string: `status_text` above already carries an escaped
+        # `stop_category`, and escaping the whole title would escape it twice -
+        # `escape(escape("a[b]c"))` is `a\\\[b]c`, two visible backslashes.
+        title = (
+            f"[bold]{escape(state.model)}[/bold] @ "
+            f"{state.temperature:.1f}{sp_marker}   {status_text}"
+        )
 
+        # The body is the widest untrusted surface in the program: it is the
+        # model's own output, rendered live. A model answering a question about
+        # markup - "you close a tag with [/]" - raised MarkupError here, mid
+        # stream, after the call had been billed.
         if state.error:
-            body = f"[red]{state.error}[/red]"
+            body = f"[red]{escape(state.error)}[/red]"
         elif state.status == "streaming":
-            body = state.text + "[cyan]▌[/cyan]"
+            body = escape(state.text) + "[cyan]▌[/cyan]"
         elif state.status in ("pending", "waiting"):
             body = "[dim]...[/dim]"
         else:
-            body = state.text or "[dim](no output)[/dim]"
+            body = escape(state.text) if state.text else "[dim](no output)[/dim]"
 
         border_style = {
             "complete": "green",
@@ -275,6 +444,10 @@ async def _call_with_retry(
     effective_system_prompt = state.system_prompt or None
 
     for attempt in range(max_retries + 1):
+        if attempt:
+            # After the backoff sleep, not before it: this attempt is timed
+            # from here, so the sleep is excluded from its TTFT.
+            state.mark_attempt_start()
         try:
             return await provider.complete(
                 prompt=prompt,
@@ -313,10 +486,19 @@ async def _run_one(
     prompt: str,
     semaphore: asyncio.Semaphore,
     max_retries: int,
+    ledger: CostLedger | None = None,
     sleep: Callable[[float], asyncio.Future[None]] = asyncio.sleep,
 ) -> None:
     """Run a single task to completion: semaphore -> retry loop -> state update."""
     async with semaphore:
+        # Checked AFTER acquiring the semaphore, which is the last moment before
+        # dispatch. A cell already past this point is always finished rather
+        # than cancelled: abandoning it would lose its cost and understate the
+        # run's total. See CostLedger.
+        if ledger is not None and ledger.exhausted:
+            ledger.skip()
+            state.mark_cancelled()
+            return
         state.mark_started()
         try:
             result = await _call_with_retry(
@@ -327,6 +509,8 @@ async def _run_one(
                 sleep=sleep,
             )
             state.mark_complete(result)
+            if ledger is not None:
+                ledger.add(result.cost_usd)
         except ModelariumError as e:
             state.mark_error(str(e))
         except Exception as e:  # noqa: BLE001 - converted to error state, not re-raised
@@ -344,6 +528,7 @@ async def run_streaming_comparison(
     concurrency: int = DEFAULT_CONCURRENCY,
     max_retries: int = DEFAULT_MAX_RETRIES,
     live_display: bool = True,
+    ledger: CostLedger | None = None,
     runs: int = 1,
     show_all_runs: bool = False,
     sleep: Callable[[float], asyncio.Future[None]] = asyncio.sleep,
@@ -368,7 +553,9 @@ async def run_streaming_comparison(
     provider.
     """
     if console is None:
-        console = Console()
+        # emoji=False for the same reason as the CLI console: escaping cannot
+        # stop `:word:` substitution, and this display renders model output.
+        console = Console(emoji=False)
     if not system_prompts:
         # Defensive: callers should pass [None] explicitly, but treat
         # missing/empty as "one task with no system prompt".
@@ -395,7 +582,7 @@ async def run_streaming_comparison(
     # forces the expanded view back on.
     if live_display and not show_all_runs and len(states) > AUTO_COLLAPSE_TASK_THRESHOLD:
         live_display = False
-        console = console or Console()
+        console = console or Console(emoji=False)
         console.print(
             "[dim]Many concurrent tasks; live display disabled "
             "(use --show-all-runs to expand).[/dim]"
@@ -416,6 +603,7 @@ async def run_streaming_comparison(
                 prompt=prompt,
                 semaphore=semaphores[s.provider_name],
                 max_retries=max_retries,
+                ledger=ledger,
                 sleep=sleep,
             )
             for s in states
