@@ -28,7 +28,7 @@ from cli_modelarium.exceptions import (
     RateLimitError,
 )
 from cli_modelarium.pricing import calculate_cost, rejects_sampling_params
-from cli_modelarium.providers._utils import extract_retry_after
+from cli_modelarium.providers._utils import TRANSIENT_STATUS_CODES, extract_retry_after
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
 from cli_modelarium.security import redact_secrets
 
@@ -173,10 +173,11 @@ class AnthropicProvider(BaseProvider):
         if isinstance(error, anthropic.RateLimitError):
             retry_after = extract_retry_after(error)
             raise RateLimitError(message, provider=self.name, retry_after=retry_after) from None
-        # Anthropic returns 529 when their service is overloaded - distinct from rate limits.
+        # 529 is Anthropic's own "overloaded"; 502/503/504 are the transient
+        # gateway states every provider can return. All are retryable.
         if (
             isinstance(error, anthropic.APIStatusError)
-            and getattr(error, "status_code", None) == 529
+            and getattr(error, "status_code", None) in TRANSIENT_STATUS_CODES
         ):
             raise ProviderOverloadedError(message, provider=self.name) from None
         raise ProviderError(message, provider=self.name) from None
