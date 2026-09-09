@@ -218,6 +218,134 @@ class TestNvapiRedaction:
         assert security.redact_secrets(benign) == benign
 
 
+class TestGoogleAuthKeyRedaction:
+    """The `AQ.Ab` Auth key, in every shape it reaches a string.
+
+    `KEY_PATTERNS["google"]` accepted this format before any rule could redact
+    it, so the tool took a key it could not scrub. `AIza` was always covered;
+    these pin the shapes that were not, and the `&key=` case is the one that
+    catches a naive append (the prefix rule matching first leaves a residue the
+    query rule redacts a second time, and a literal replacement turns `&` into
+    `?`).
+    """
+
+    AUTH = "AQ.AbSyntheticTestKey-not_a_real_credential01"
+    AIZA = "AIzaSyNOT_A_REAL_KEY-test_fixture_000000"
+
+    def test_a_bare_auth_key_is_redacted(self) -> None:
+        assert security.redact_secrets(self.AUTH) == "AQ.Ab***REDACTED***"
+
+    def test_an_auth_key_in_a_json_error_body_is_redacted(self) -> None:
+        body = '{"error":{"message":"API key not valid: ' + self.AUTH + '"}}'
+        assert self.AUTH not in security.redact_secrets(body)
+
+    def test_the_x_goog_api_key_header_is_redacted(self) -> None:
+        # `x-api-key:` cannot match this - `x-goog-api-key` does not contain it.
+        redacted = security.redact_secrets(f"x-goog-api-key: {self.AUTH}")
+        assert redacted == "x-goog-api-key: ***REDACTED***"
+
+    def test_the_query_parameter_is_redacted(self) -> None:
+        # `api[-_]?key=` cannot match a bare `?key=`, which is the shape
+        # Gemini's REST URL carries.
+        url = f"https://generativelanguage.googleapis.com/v1/models?key={self.AUTH}"
+        assert security.redact_secrets(url) == (
+            "https://generativelanguage.googleapis.com/v1/models?key=***REDACTED***"
+        )
+
+    def test_a_trailing_query_parameter_keeps_its_separator(self) -> None:
+        # The case no rule covered and the one a naive fix mangles: `&` must
+        # survive as `&`, and the key must be redacted exactly once.
+        url = f"https://generativelanguage.googleapis.com/v1/models?alt=json&key={self.AUTH}"
+        redacted = security.redact_secrets(url)
+        assert redacted == (
+            "https://generativelanguage.googleapis.com/v1/models"
+            "?alt=json&key=***REDACTED***"
+        )
+        assert redacted.count("***REDACTED***") == 1
+
+    def test_the_standard_key_still_redacts(self) -> None:
+        # `AIza` keys keep working until Google stops accepting them; adding the
+        # Auth rules must not move this.
+        assert security.redact_secrets(self.AIZA) == "AIza***REDACTED***"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            AUTH,
+            AIZA,
+            f"x-goog-api-key: {AUTH}",
+            f"https://g.example/v1/m?key={AUTH}",
+            f"https://g.example/v1/m?alt=json&key={AUTH}",
+        ],
+    )
+    def test_redaction_is_idempotent(self, text: str) -> None:
+        once = security.redact_secrets(text)
+        assert security.redact_secrets(once) == once
+
+    @pytest.mark.parametrize(
+        "benign",
+        [
+            "claude-opus-4-8-20260115",
+            "openai/gpt-oss-safeguard-20b",
+            "550e8400-e29b-41d4-a716-446655440000",
+            "c1c4275ae09ed9b36097050ec9d2c7f08377a263",
+            "aGVsbG8gd29ybGQgdGhpcyBpcyBub3QgYSBrZXk=",
+            "req_011CeeQ96pw3aD1U8ZgP4w7P",
+            "https://generativelanguage.googleapis.com/v1/models",
+            "https://example.com/search?keyword=gemini&q=1",
+            "2026-09-02T16:18:44.123456Z",
+        ],
+    )
+    def test_ordinary_text_is_untouched(self, benign: str) -> None:
+        # A rule broad enough to catch a bare Mistral or Z.AI token would eat
+        # most of these; a prefixed rule does not. This is why `AQ.Ab` is fixed
+        # and those two remain a documented limitation.
+        assert security.redact_secrets(benign) == benign
+
+
+class TestNoProviderIsNewlyRejected:
+    """The lockout guard.
+
+    This change touches `REDACT_PATTERNS` only. If a future edit reaches across
+    into `KEY_PATTERNS`, a valid key starts failing at `keys set` - which is
+    worse than the leak being fixed here.
+    """
+
+    @pytest.mark.parametrize(
+        "provider,key",
+        [
+            ("openai", "sk-proj-NOT_A_REAL_KEY_test_fixture_00"),
+            ("openai", "sk-NOT_A_REAL_KEY_test_fixture_0000"),
+            ("anthropic", "sk-ant-api03-NOT_A_REAL_KEY_test_fixture"),
+            ("google", "AIzaSyNOT_A_REAL_KEY-test_fixture_000000"),
+            ("google", "AQ.AbSyntheticTestKey-not_a_real_credential01"),
+            ("xai", "xai-NOT_A_REAL_KEY_test_fixture_00"),
+            ("deepseek", "sk-NOT_A_REAL_KEY_test_fixture_0000"),
+            # Mistral is prefixless and its class is `[A-Za-z0-9]` only, so this
+            # fixture cannot carry the `NOT_A_REAL_KEY` marker the others do, and
+            # a 32-character bare alphanumeric run is exactly what a real Mistral
+            # key is - GitHub push protection refuses one whatever it spells.
+            # Built by repetition instead, so no long literal reaches the source;
+            # `("google", "a" * 29)` above is the same idiom. Keep it longer than
+            # the 24-character `TestValidateKey` fixture: this is the only
+            # assertion in the suite that a mistral key above that length
+            # validates, so a ceiling on the pattern (`{20,24}`, say) would lock
+            # out every real key with the whole suite still green.
+            ("mistral", "NOTAREALKEY" * 3),
+            ("groq", "gsk_NOT_A_REAL_KEY_test_fixture_00"),
+            ("openrouter", "sk-or-NOT_A_REAL_KEY_test_fixture_0"),
+            ("dashscope", "sk-NOT_A_REAL_KEY_test_fixture_0000"),
+            ("zai", "NOT_A_REAL_KEY.test_fixture_00000"),
+            ("nvidia", "nvapi-NOT_A_REAL_KEY_test_fixture_0"),
+            ("moonshot", "sk-NOT_A_REAL_KEY_test_fixture_0000"),
+        ],
+    )
+    def test_every_provider_still_accepts_a_valid_key(
+        self, provider: str, key: str
+    ) -> None:
+        assert security.validate_key(provider, key)
+
+
 class TestRedactionRegressionPins:
     """Byte-identical pins for every pre-existing rule.
 
