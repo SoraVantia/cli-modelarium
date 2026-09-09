@@ -23,6 +23,7 @@ from google.genai import errors as genai_errors
 from cli_modelarium.exceptions import (
     AuthenticationError,
     ProviderError,
+    ProviderOverloadedError,
     RateLimitError,
 )
 from cli_modelarium.pricing import PRICING
@@ -255,6 +256,32 @@ async def test_403_translated_to_authentication_error(monkeypatch: pytest.Monkey
     provider, _ = _make_provider(monkeypatch, error=err)
 
     with pytest.raises(AuthenticationError):
+        await provider.complete("p", "gemini-3.1-pro-preview", 0.0)
+
+
+def _server_error(code: int, message: str) -> genai_errors.ServerError:
+    request = httpx.Request("POST", "https://generativelanguage.googleapis.com/v1/models")
+    response = httpx.Response(code, request=request)
+    return genai_errors.ServerError(
+        code, response_json={"error": {"code": code, "message": message}}, response=response
+    )
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+async def test_transient_5xx_is_retryable(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    """503 is the one Gemini actually returns under load, and it must retry.
+
+    Measured on 2026-09-06: gemini-3.8-flash returned 503 "This model is
+    currently experiencing high demand" on 6 of 14 live attempts. Before this
+    mapping only 429 was retryable here, so each one became a bare
+    ProviderError - a dead cell at 0 tokens while the rest of the sweep billed.
+    """
+    err = _server_error(status, "experiencing high demand")
+    provider, _ = _make_provider(monkeypatch, error=err)
+
+    with pytest.raises(ProviderOverloadedError):
         await provider.complete("p", "gemini-3.1-pro-preview", 0.0)
 
 
