@@ -185,10 +185,17 @@ class TestTheContractCheckerCanActuallyFail:
 
 
 class TestPredicate:
-    def test_the_flagged_set_is_exactly_seventeen(self) -> None:
+    def test_the_flagged_set_is_exactly_nineteen(self) -> None:
         # A tripwire, not a fact about the registry's size: growing this number
         # must be a deliberate edit. Nine in 0.1.5; the three gpt-5.6 models
         # were measured 2026-08-07 and added.
+        #
+        # gpt-6-astra was measured 2026-09-06 - temperature=0.5 returned a 400
+        # reading "Only the default (1) value is supported" while 1.0 was
+        # accepted. gemini-3.8-flash was added in the same pass and is the FIRST
+        # Google row ever flagged; every other gemini entry still sends a
+        # temperature. That asymmetry is worth a second look if a gemini call
+        # starts 400ing on a temperature it used to accept.
         #
         # The four kimi rows were flagged from Moonshot's parameter reference,
         # not a measured 400 - no call has ever been made against that
@@ -198,7 +205,7 @@ class TestPredicate:
         # suite: temperature, top_p and top_k each returned a 400 reading
         # "deprecated for this model". That is a measured 400, the bar this
         # file sets - it just was not measured here.
-        assert len(REJECTING) == 17, REJECTING
+        assert len(REJECTING) == 19, REJECTING
 
     def test_no_entry_carries_a_false_flag(self) -> None:
         # Absent means send; an explicit False would be a confusing second way
@@ -611,7 +618,9 @@ class TestMarkdownDegradedCaveat:
                 )
             ]
         )
-        assert "degraded: claude-opus-5" in md
+        # The model id is a code span since 0.1.9 - a judge model id is
+        # user-supplied and one containing a pipe used to add a table column.
+        assert "degraded: `claude-opus-5`" in md
 
     def test_panel_row_carries_the_caveat_alongside_the_average(self) -> None:
         md = _format_markdown(
@@ -626,7 +635,9 @@ class TestMarkdownDegradedCaveat:
             ]
         )
         assert "Avg 7.0" in md
-        assert "degraded: claude-opus-5" in md
+        # The model id is a code span since 0.1.9 - a judge model id is
+        # user-supplied and one containing a pipe used to add a table column.
+        assert "degraded: `claude-opus-5`" in md
 
     def test_parse_failed_row_still_carries_the_caveat(self) -> None:
         md = _format_markdown(
@@ -641,7 +652,9 @@ class TestMarkdownDegradedCaveat:
             ]
         )
         assert "N/A (judge parse failed)" in md
-        assert "degraded: claude-opus-5" in md
+        # The model id is a code span since 0.1.9 - a judge model id is
+        # user-supplied and one containing a pipe used to add a table column.
+        assert "degraded: `claude-opus-5`" in md
 
     def test_undegraded_row_says_nothing(self) -> None:
         md = _format_markdown(
@@ -734,7 +747,7 @@ class TestSweepWarning:
         assert "claude-opus-5" in out
         # The accepting model in the same run must not be implicated.
         assert "gpt-5.4" not in out
-        assert "identical rather than a sweep" in out
+        assert "not a sweep" in out
         assert "what was requested, not what was applied" in out
 
     def test_names_group_members_the_user_never_typed(
@@ -789,7 +802,7 @@ ALL_UNAFFECTED_PAIR = UNAFFECTED[:2]
 
 # Signature phrases, one per message, so a merged panel can be told apart from
 # a panel carrying only half its content.
-SWEEP_PHRASE = "identical rather than a sweep"
+SWEEP_PHRASE = "not a sweep"
 VERDICT_PHRASE = "rather than a difference in model quality"
 
 
@@ -1241,10 +1254,13 @@ class TestCsvUntouchedByTheMixedKey:
 
     def test_csv_columns_unchanged(self) -> None:
         from cli_modelarium.output_formatters import CSV_COLUMNS
+        from tests.conftest import V019_COLUMNS
 
-        assert len(CSV_COLUMNS) == 23
+        # A PREFIX assertion, not a width one. The width check used to run
+        # first and shadow the index check below it, so the only real ordering
+        # pin in the suite never reported on the change it existed to catch.
+        assert CSV_COLUMNS[: len(V019_COLUMNS)] == V019_COLUMNS
         assert "significance_temperature_mixed" not in CSV_COLUMNS
-        assert CSV_COLUMNS[4] == "temperature"
 
     def test_write_csv_takes_no_such_parameter(self) -> None:
         import inspect
